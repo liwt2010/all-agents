@@ -1,0 +1,85 @@
+# GitHub Actions CI for Agent System
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,api,storage]"
+
+      - name: Run tests
+        run: |
+          pytest tests/ -v --tb=short --maxfail=10
+
+      - name: Type check
+        run: |
+          python -c "from agent_system.core.graph import MultiLinkGraph; print('imports ok')"
+        continue-on-error: true
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install + build
+        run: |
+          npm ci
+          npm run build
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install + check imports
+        run: |
+          python -m pip install -e ".[dev,api,storage]"
+          python -c "
+          # Smoke-test that everything imports
+          from agent_system.agents.ceo_agent import CEOAgent
+          from agent_system.core.auth import AuthService, RBAC
+          from agent_system.storage.task_store import TaskRecord
+          from agent_system.tools.mcp_client import MCPClient
+          from agent_system.concurrency.lock import ResourceLock
+          from agent_system.observability.metrics import MetricsRegistry
+          print('All imports OK')
+          "

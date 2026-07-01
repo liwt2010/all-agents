@@ -1,0 +1,16 @@
+apiVersion: v2
+name: agent-system
+description: Enterprise Multi-Agent Platform (Helm chart)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - agents
+  - llm
+  - saas
+home: https://github.com/your-org/agent-system
+sources:
+  - https://github.com/your-org/agent-system
+maintainers:
+  - name: Platform Team
+    email: platform@example.com

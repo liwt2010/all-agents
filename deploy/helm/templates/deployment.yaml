@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agent-system.fullname" . }}
+  labels:
+    {{- include "agent-system.labels" . }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "agent-system.selectorLabels" . }}
+  template:
+    metadata:
+      labels:
+        {{- include "agent-system.selectorLabels" . }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agent-system-secrets
+                  key: anthropic-api-key
+            {{- if .Values.postgresUrl }}
+            - name: POSTGRES_URL
+              value: {{ .Values.postgresUrl | quote }}
+            {{- end }}
+            {{- if .Values.redisUrl }}
+            - name: REDIS_URL
+              value: {{ .Values.redisUrl | quote }}
+            {{- end }}
+            - name: MCP_SERVERS
+              value: {{ .Values.mcpServers | quote }}
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30

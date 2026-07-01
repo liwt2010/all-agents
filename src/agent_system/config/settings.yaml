@@ -1,0 +1,79 @@
+# Agent System 配置
+# 按 ARCHITECTURE.md v15.1 设计
+
+system:
+  name: "Agent System"
+  version: "0.1.0"
+  environment: "development"  # development / staging / production
+
+llm:
+  default:
+    model: "claude-sonnet-4-20250514"
+    max_tokens: 4096
+    temperature: 0.7
+  fast:
+    model: "claude-haiku-4-5-20251001"
+    max_tokens: 2048
+    temperature: 0.3
+  agents:
+    product_agent:
+      model: "claude-sonnet-4-20250514"
+      max_tokens: 4096
+      temperature: 0.7
+    tech_agent:
+      model: "claude-sonnet-4-20250514"
+      max_tokens: 4096
+      temperature: 0.5
+    test_agent:
+      model: "claude-haiku-4-5-20251001"
+      max_tokens: 4096
+      temperature: 0.3
+
+mcp_servers:
+  filesystem:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "./"]
+  # 后续可追加更多 MCP server
+
+tools:
+  enabled:
+    - read_file
+    - write_file
+    - list_files
+  config:
+    read_file:
+      max_size: 100000
+    write_file:
+      max_size: 100000
+
+graph:
+  max_retries: 3
+  timeout:
+    quick: 60
+    standard: 300
+    complex: 1800
+    long: 7200
+    batch: 86400
+
+memory:
+  graph_dir: "data/graph"
+  node_types:
+    - task
+    - output
+    - failure
+    - experience
+    - tool
+    - user
+    - prompt
+    - schema
+  link_types:
+    - refers_to
+    - caused_by
+    - created_by
+    - part_of
+    - before
+    - after
+    - evolved_from
+    - supersedes
+    - validated_by
+    - tested_by

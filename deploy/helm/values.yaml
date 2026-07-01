@@ -1,0 +1,55 @@
+# Default values for the Agent System Helm chart.
+
+replicaCount: 2
+
+image:
+  repository: agent-system
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: agent-system.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+env:
+  # Required: Anthropic API key
+  anthropicApiKey: ""
+  # Optional: storage backends
+  postgresUrl: ""
+  redisUrl: ""
+  # Optional: MCP server list (JSON)
+  mcpServers: "[]"
+  # Optional: secret store
+  vaultUrl: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

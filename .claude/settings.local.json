@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m venv .venv)",
+      "Bash(ls .venv/Scripts/activate)",
+      "Bash(ls .venv/bin/activate)",
+      "Bash(curl -s http://localhost:8000/api/metrics/prometheus)",
+      "Bash(python -c \"import sys,json; print\\(json.load\\(sys.stdin\\)['metrics_text']\\)\")",
+      "Bash(curl -s http://localhost:8000/api/graph/stats)",
+      "Bash(python -c \"import sys,json; print\\(json.dumps\\(json.load\\(sys.stdin\\), ensure_ascii=False, indent=2\\)\\)\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'Total: {d[\\\\\"total_nodes\\\\\"]} nodes, {d[\\\\\"total_links\\\\\"]} links'\\); [print\\(f'  {k}: {v}'\\) for k,v in d.get\\('nodes_by_type', {}\\).items\\(\\)]\")",
+      "Bash(curl -s -o /dev/null -w \"frontend: %{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(curl -s -o /dev/null -w \"backend: %{http_code}\\\\n\" http://localhost:8000/api/health)",
+      "Bash(curl -s -X POST http://localhost:8000/api/tasks -H \"Content-Type: application/json\" -d '{\"input\":\"build a search feature\",\"agent\":\"product\"}')",
+      "Bash(curl -s -X POST http://localhost:8000/api/tasks -H \"Content-Type: application/json\" -d '{\"input\":\"build a todo app\",\"agent\":\"ceo\"}')",
+      "Bash(curl -s -X POST http://localhost:8000/api/tasks -H \"Content-Type: application/json\" -d '{\"input\":\"JWT auth\",\"agent\":\"tech\"}')",
+      "Bash(curl -s http://localhost:5173/)",
+      "Bash(grep -E \"FAILED\" /tmp/result.log | head -20)"
+    ]
+  }
+}
