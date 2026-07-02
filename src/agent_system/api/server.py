@@ -22,9 +22,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# Load .env before any imports that read os.environ
+load_dotenv()
 
 from agent_system.agents.product_agent import ProductAgent
 from agent_system.agents.tech_agent import TechAgent

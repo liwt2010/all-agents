@@ -2,7 +2,7 @@
 LLM Router — production-grade LLM integration.
 
 Capabilities:
-  - Real Anthropic API (AsyncAnthropic) with full async/await
+  - Multi-provider: Anthropic API + OpenAI-compatible (DeepSeek, etc.)
   - Mock mode (when no API key) — same interface, used for dev/test
   - Retry with exponential backoff on transient errors
   - Tool use loop (multi-turn tool execution)
@@ -72,6 +72,8 @@ def set_llm_context(agent: str, task: str):
 MODEL_PRICING = {
     "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
     "claude-haiku-4-5-20251001": {"input": 0.25, "output": 1.25, "cache_read": 0.03, "cache_write": 0.30},
+    # DeepSeek models (via OpenAI-compatible API)
+    "deepseek-chat": {"input": 0.14, "output": 0.28, "cache_read": 0.07, "cache_write": 0.14},
 }
 DEFAULT_PRICING = {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75}
 
@@ -79,6 +81,7 @@ DEFAULT_PRICING = {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_writ
 MODEL_LIMITS = {
     "claude-sonnet-4-20250514": 200_000,
     "claude-haiku-4-5-20251001": 200_000,
+    "deepseek-chat": 64_000,
 }
 
 
@@ -134,7 +137,7 @@ class LLMRouter:
     """
     Production LLM router.
 
-    - Async-first (uses AsyncAnthropic)
+    - Supports Anthropic API (AsyncAnthropic) and OpenAI-compatible (DeepSeek, etc.)
     - Mock mode when no API key (deterministic, for dev/test)
     - Retry with exponential backoff
     - Tool-use loop with budget cap
@@ -147,8 +150,26 @@ class LLMRouter:
     def __init__(self, default_max_retries: int = 3):
         self.settings = get_settings()
         self.default_max_retries = default_max_retries
-        self._client = None  # lazy-init
+        self._anthropic_client = None  # lazy-init
+        self._openai_client = None     # lazy-init
         self._mock_mode: Optional[bool] = None
+
+    @property
+    def llm_provider(self) -> str:
+        """Get configured LLM provider: anthropic, openai, or mock."""
+        return os.environ.get("LLM_PROVIDER", "anthropic").strip().lower()
+
+    @property
+    def api_key(self) -> str:
+        """Get the API key from env, checking provider-specific keys first."""
+        if self.llm_provider == "openai":
+            return os.environ.get("OPENAI_API_KEY", "").strip()
+        return os.environ.get("ANTHROPIC_API_KEY", "").strip()
+
+    @property
+    def openai_base_url(self) -> str:
+        """Get the OpenAI-compatible base URL."""
+        return os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com").strip()
 
     def get_config(self, agent_name: str, task_complexity: Optional[str] = None) -> LLMConfig:
         """Get LLM config for an agent, optionally adjusting for task complexity"""
@@ -165,7 +186,7 @@ class LLMRouter:
     @property
     def is_mock_mode(self) -> bool:
         if self._mock_mode is None:
-            self._mock_mode = not bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+            self._mock_mode = not bool(self.api_key)
         return self._mock_mode
 
     def require_real_key(self) -> None:
@@ -177,23 +198,41 @@ class LLMRouter:
         env = os.environ.get("ENVIRONMENT", "").lower()
         if env in ("production", "prod") and self.is_mock_mode:
             raise RuntimeError(
-                "ANTHROPIC_API_KEY is missing in production environment. "
+                "API key is missing in production environment. "
                 "Refusing to run in mock mode."
             )
 
-    def get_api_client(self):
-        """Lazy-initialize the async client."""
-        if self._client is not None:
-            return self._client
+    def get_anthropic_client(self):
+        """Lazy-initialize the Anthropic async client."""
+        if self._anthropic_client is not None:
+            return self._anthropic_client
         api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
             return None
         try:
             from anthropic import AsyncAnthropic
-            self._client = AsyncAnthropic(api_key=api_key, max_retries=0)  # we handle retries
-            return self._client
+            self._anthropic_client = AsyncAnthropic(api_key=api_key, max_retries=0)
+            return self._anthropic_client
         except ImportError as e:
             logger.error(f"anthropic SDK not installed: {e}")
+            return None
+
+    def get_openai_client(self):
+        """Lazy-initialize the OpenAI-compatible async client (DeepSeek etc.)."""
+        if self._openai_client is not None:
+            return self._openai_client
+        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            return None
+        try:
+            from openai import AsyncOpenAI
+            self._openai_client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=self.openai_base_url,
+            )
+            return self._openai_client
+        except ImportError as e:
+            logger.error(f"openai SDK not installed: {e}")
             return None
 
     @staticmethod
@@ -270,7 +309,13 @@ class LLMRouter:
         if self.is_mock_mode:
             return self._mock_response(system_prompt, messages)
 
-        client = self.get_api_client()
+        if self.llm_provider == "openai":
+            return await self._call_openai(
+                config, system_prompt, messages, tools, tool_executor, max_tool_turns
+            )
+
+        # Anthropic provider
+        client = self.get_anthropic_client()
         if not client:
             logger.warning("Anthropic SDK not available, falling back to mock")
             return self._mock_response(system_prompt, messages)
@@ -430,17 +475,133 @@ class LLMRouter:
 
         return text, usage_obj, raw_blocks
 
+    # ── OpenAI-compatible provider (DeepSeek, etc.) ──
+
+    async def _call_openai(
+        self,
+        config: LLMConfig,
+        system_prompt: str,
+        messages: list,
+        tools: Optional[list],
+        tool_executor: Optional[ToolExecutor],
+        max_tool_turns: int,
+    ) -> Tuple[str, LLMUsage]:
+        """Call an OpenAI-compatible API (DeepSeek, etc.) with optional tool use."""
+        client = self.get_openai_client()
+        if not client:
+            logger.warning("OpenAI client not available, falling back to mock")
+            return self._mock_response(system_prompt, messages)
+
+        # Convert LangGraph-style tools to OpenAI tool format
+        openai_tools = None
+        if tools:
+            openai_tools = []
+            for t in tools:
+                openai_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": t.get("name", t.get("function", {}).get("name", "unknown")),
+                        "description": t.get("description", ""),
+                        "parameters": t.get("input_schema", t.get("parameters", {})),
+                    }
+                })
+
+        usage_total = LLMUsage(model=config.model, mock=False)
+        current_messages = list(messages)
+
+        # Convert system prompt to messages format (OpenAI uses system role)
+        openai_messages = []
+        if system_prompt:
+            openai_messages.append({"role": "system", "content": system_prompt})
+        openai_messages.extend(current_messages)
+
+        for turn in range(max_tool_turns + 1):
+            start = time.time()
+            kwargs = {
+                "model": config.model,
+                "max_tokens": config.max_tokens,
+                "temperature": config.temperature,
+                "messages": openai_messages,
+            }
+            if openai_tools:
+                kwargs["tools"] = openai_tools
+
+            try:
+                response = await client.chat.completions.create(**kwargs)
+            except Exception as e:
+                raise TransientLLMError(f"OpenAI API call failed: {e}") from e
+
+            duration = (time.time() - start) * 1000
+
+            choice = response.choices[0] if response.choices else None
+            if not choice:
+                raise LLMError("No response choices returned")
+
+            msg = choice.message
+            text = msg.content or ""
+
+            # Usage from OpenAI response
+            usage_info = response.usage
+            input_tokens = usage_info.prompt_tokens if usage_info else 0
+            output_tokens = usage_info.completion_tokens if usage_info else 0
+            cost = estimate_cost(config.model, input_tokens, output_tokens)
+
+            usage_total.input_tokens += input_tokens
+            usage_total.output_tokens += output_tokens
+            usage_total.cost_estimate += cost
+            usage_total.duration_ms += duration
+
+            self._record_cost(usage_total)
+
+            # Check for tool calls
+            if not tool_executor or not msg.tool_calls:
+                return text, usage_total
+
+            # Execute tools and append results
+            openai_messages.append(msg.model_dump())
+            for tc in msg.tool_calls:
+                try:
+                    tool_input = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    tool_input = {}
+                output, is_error = await tool_executor.execute(tc.function.name, tool_input)
+                openai_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": output[:8000],
+                })
+
+        logger.warning(f"OpenAI tool loop hit max_turns={max_tool_turns}, returning last text")
+        return text, usage_total
+
     def _classify_and_raise(self, e: Exception):
         """Convert an SDK exception to LLMError with proper classification."""
-        from anthropic import APIStatusError, APITimeoutError, APIConnectionError, APIError
-        if isinstance(e, APIStatusError):
-            if e.status_code in self.RETRIABLE_STATUS_CODES:
-                raise TransientLLMError(f"Status {e.status_code}: {e.message}") from e
-            raise FatalLLMError(f"Status {e.status_code}: {e.message}") from e
-        if isinstance(e, (APITimeoutError, APIConnectionError)):
-            raise TransientLLMError(str(e)) from e
-        if isinstance(e, APIError):
-            raise FatalLLMError(str(e)) from e
+        # Try Anthropic error types first
+        try:
+            from anthropic import APIStatusError, APITimeoutError, APIConnectionError, APIError
+            if isinstance(e, APIStatusError):
+                if e.status_code in self.RETRIABLE_STATUS_CODES:
+                    raise TransientLLMError(f"Status {e.status_code}: {e.message}") from e
+                raise FatalLLMError(f"Status {e.status_code}: {e.message}") from e
+            if isinstance(e, (APITimeoutError, APIConnectionError)):
+                raise TransientLLMError(str(e)) from e
+            if isinstance(e, APIError):
+                raise FatalLLMError(str(e)) from e
+        except ImportError:
+            pass
+        # Try OpenAI error types
+        try:
+            from openai import APIStatusError, APITimeoutError, APIConnectionError, APIError
+            if isinstance(e, APIStatusError):
+                if e.status_code in self.RETRIABLE_STATUS_CODES:
+                    raise TransientLLMError(f"Status {e.status_code}: {e.message}") from e
+                raise FatalLLMError(f"Status {e.status_code}: {e.message}") from e
+            if isinstance(e, (APITimeoutError, APIConnectionError)):
+                raise TransientLLMError(str(e)) from e
+            if isinstance(e, APIError):
+                raise FatalLLMError(str(e)) from e
+        except ImportError:
+            pass
         # Unknown error
         raise LLMError(str(e)) from e
 

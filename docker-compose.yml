@@ -1,37 +1,86 @@
+# Agent System — Full Docker Compose (offline-friendly)
+# All 4 services for a production-ready deployment:
+#   1. web       - React UI served by nginx
+#   2. api       - FastAPI backend
+#   3. redis     - cache + rate limiter + pub/sub
+#   4. (storage) - SQLite file in shared volume (no external DB needed)
+# Optional: postgres service commented (requires pulling postgres:16-alpine)
 version: "3.9"
 
 services:
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: agent-web
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent-api
     ports:
       - "8000:8000"
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - AGENT_CONFIG_PATH=/app/src/agent_system/config/settings.yaml
-      - PYTHONUNBUFFERED=1
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AUTH_SECRET: ${AUTH_SECRET:-dev-32-character-secret-key-1234567890}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      # Use SQLite (file-backed, no external DB needed) for the demo
+      POSTGRES_URL: ${POSTGRES_URL:-sqlite:////data/agent.sqlite}
+      REDIS_URL: redis://redis:6379/0
+      DISABLE_SECURITY_MIDDLEWARE: "0"
+      PYTHONUNBUFFERED: "1"
     volumes:
       - agent_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 10s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
 
-  # Optional: Postgres for production persistence
+  redis:
+    image: redis:7-alpine
+    container_name: agent-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Optional: enable postgres for production deployments
   # postgres:
   #   image: postgres:16-alpine
+  #   container_name: agent-postgres
   #   environment:
   #     POSTGRES_DB: agent_system
   #     POSTGRES_USER: agent
   #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
   #   volumes:
   #     - postgres_data:/var/lib/postgresql/data
-
-  # Optional: Redis for caching and pub/sub
-  # redis:
-  #   image: redis:7-alpine
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U agent -d agent_system"]
+  #   restart: unless-stopped
 
 volumes:
   agent_data:
+  postgres_data:

@@ -5,11 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-system"
 version = "0.1.0"
-description = "Enterprise Multi-Agent Collaboration Platform — AI-powered workflow automation with 9 built-in agents, MCP tools, and multi-tenant isolation."
+description = "Enterprise Multi-Agent Collaboration Platform"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-repository = "https://github.com/anthropics/agent-system"
 dependencies = [
     "langgraph>=0.4.0",
     "langchain-anthropic>=0.3.0",
@@ -31,7 +30,7 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=5.0",
 ]
-autogen = ["pyautogen>=0.2.0"]
+autogen = ["autogen-agentchat>=0.4.0", "autogen-ext[openai]>=0.4.0"]
 api = ["fastapi>=0.115.0", "uvicorn>=0.30.0", "websockets>=13.0"]
 storage = ["sqlalchemy>=2.0", "redis>=5.0", "psycopg2-binary>=2.9"]
 

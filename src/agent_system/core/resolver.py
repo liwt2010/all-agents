@@ -36,10 +36,7 @@ from agent_system.core.agent import (
 )
 from agent_system.core.schema import NextStep
 from agent_system.core.mixins.discussion import (
-    DiscussionContext,
     DiscussionResult,
-    DiscussionMixin,
-    PeerProvider,
 )
 from agent_system.memory.graph import get_graph
 from agent_system.memory.experience import (
@@ -203,24 +200,19 @@ class SmartResolver:
         error: Exception,
         analysis: ProblemAnalysis,
     ) -> ResolutionResult:
-        """Real PEER path: discuss with peer agents via DiscussionMixin."""
-        from agent_system.core.mixins.discussion import DiscussionMixin
-
-        # The agent class already has DiscussionMixin in its MRO via this
-        # adapter. We just need the methods.
+        """Real PEER path: discuss with peer agents via AutoGen or DiscussionMixin."""
         adapter = _PeerDiscussionAdapter(self.agent)
         discussion_result = await adapter.run_peer_discussion(task, error, analysis)
 
         # Build a legacy discussion dict from the DiscussionResult for
         # compatibility with the existing return shape.
-        discussion_dicts = [
-            {
-                "agent": m.agent,
-                "role": m.role.value,
-                "message": m.message,
-            }
-            for m in discussion_result.transcript
-        ]
+        discussion_dicts = []
+        for m in discussion_result.transcript:
+            entry = {"agent": m.agent, "message": m.message}
+            # role may be a DiscussionRole enum; convert to string
+            role_val = m.role.value if hasattr(m.role, "value") else str(m.role)
+            entry["role"] = role_val
+            discussion_dicts.append(entry)
 
         if not discussion_result.successful():
             # No usable consensus — escalate to CEO
@@ -512,25 +504,47 @@ class SmartResolver:
         return risk_map.get(analysis.severity, {"level": "unknown", "description": "Unknown risk"})
 
 
-# ── Bridge: SmartResolver -> DiscussionMixin ──
+# ── Bridge: SmartResolver -> DiscussionMixin / AutoGen ──
 
-class _PeerDiscussionAdapter(DiscussionMixin):
+class _PeerDiscussionAdapter:
     """
-    Wraps a SmartAgent and turns it into a DiscussionMixin-capable object
-    with peer providers that invoke the other agents via do_work().
+    Wraps a SmartAgent and runs a multi-agent discussion using
+    AutoGen 0.4+ RoundRobinGroupChat (preferred) or falls back to the
+    legacy DiscussionMixin when AutoGen is not available.
 
-    This is the integration layer between the old `_peer_round_robin` style
-    (which called peer_agent.do_work()) and the new `DiscussionMixin` API
-    (which uses a PeerProvider callable).
+    The adapter hides the implementation detail from SmartResolver: it
+    always returns a DiscussionResult.
     """
 
     def __init__(self, original_agent: SmartAgent):
-        # Don't call super().__init__() — we just need the .discuss() method.
-        # Inherit attributes by setting them directly.
+        self.agent = original_agent
+        # Lazy import: try AutoGen first, fall back to DiscussionMixin
+        self._use_autogen = True
+        try:
+            from agent_system.core.autogen_discussion import AutoGenGroupChat, HAS_AUTOGEN
+            self._has_autogen = HAS_AUTOGEN
+        except ImportError:
+            self._has_autogen = False
+        if not self._has_autogen:
+            self._init_legacy_mixin(original_agent)
+
+    def _init_legacy_mixin(self, original_agent: SmartAgent):
+        """Fallback: use the old DiscussionMixin (single-round parallel)."""
+        from agent_system.core.mixins.discussion import DiscussionMixin, PeerProvider
+        # Patch in the mixin's methods
+        for attr in ("discuss", "_select_peers", "_format_opening",
+                     "_gather_peer_perspectives", "_synthesize",
+                     "_extract_consensus", "register_peer", "_all_peers",
+                     "_score_peer", "_format_peer_prompt", "_extract_peer_message"):
+            if hasattr(DiscussionMixin, attr):
+                setattr(self, attr, getattr(DiscussionMixin, attr).__get__(self, _PeerDiscussionAdapter))
+        # Set mixin attributes
         object.__setattr__(self, "agent_name", original_agent.agent_name)
         object.__setattr__(self, "agent_capabilities", list(original_agent.agent_capabilities))
         object.__setattr__(self, "_instance_peers", None)
-        # Register the other 3 agents as peers
+        object.__setattr__(self, "_peer_registry", {})  # instance level
+        # Also set on class so DiscussionMixin.register_peer's type(self) path works
+        _PeerDiscussionAdapter._peer_registry = {}
         self._setup_default_peers(original_agent)
 
     def _setup_default_peers(self, original_agent: SmartAgent):
@@ -539,11 +553,8 @@ class _PeerDiscussionAdapter(DiscussionMixin):
         from agent_system.agents.test_agent import TestAgent
         from agent_system.agents.deploy_agent import DeployAgent
         from agent_system.agents.ceo_agent import CEOAgent
+        from agent_system.core.mixins.discussion import PeerProvider
 
-        # Each entry: (name, class, capabilities)
-        # We instantiate the class once just to read its capabilities.
-        # This is fine since agents are Pydantic models; default_factory
-        # for capabilities gives the same list.
         peer_configs = [
             ("product_agent", ProductAgent),
             ("tech_agent", TechAgent),
@@ -555,8 +566,6 @@ class _PeerDiscussionAdapter(DiscussionMixin):
         for name, cls in peer_configs:
             if name == original_agent.agent_name:
                 continue
-            # Read capabilities by instantiating (Pydantic class-level
-            # default is shared across instances)
             sample = cls()
             caps = list(sample.agent_capabilities)
             provider = self._make_peer_provider(name, cls, caps)
@@ -564,10 +573,9 @@ class _PeerDiscussionAdapter(DiscussionMixin):
 
     def _make_peer_provider(self, name: str, agent_cls, caps):
         """Build a PeerProvider whose peer_fn calls the agent's do_work()."""
-        # Capture the call in a closure to avoid late-binding issues
+        from agent_system.core.mixins.discussion import PeerProvider
         def make_peer_fn():
             async def peer_fn(peer_name, ctx):
-                # Lazy-instantiate the agent (constructor may be heavy)
                 peer = agent_cls()
                 prompt = (
                     f"You're a peer agent with capabilities: {peer.agent_capabilities}. "
@@ -583,7 +591,6 @@ class _PeerDiscussionAdapter(DiscussionMixin):
                 )
                 return await peer.do_work(peer_ctx)
             return peer_fn
-
         provider = PeerProvider(peer_fn=make_peer_fn())
         provider.capabilities = list(caps)
         return provider
@@ -594,13 +601,44 @@ class _PeerDiscussionAdapter(DiscussionMixin):
         error: Exception,
         analysis: ProblemAnalysis,
     ) -> DiscussionResult:
-        """Run the discussion round."""
+        """Run the discussion round — AutoGen first, legacy fallback."""
+        # Try AutoGen path
+        if self._has_autogen:
+            try:
+                from agent_system.core.autogen_discussion import AutoGenGroupChat
+                chat = AutoGenGroupChat()
+                result: ResolutionResult = await chat.run(task, error, analysis, self.agent)
+                if result.status == "success":
+                    # Convert ResolutionResult -> DiscussionResult (legacy format)
+                    msg = result.discussion_log[-1]["message"] if result.discussion_log else ""
+                    return DiscussionResult(
+                        context=DiscussionContext(
+                            task_id=task.task_id,
+                            task_input=task.input[:200],
+                            error=str(error)[:200],
+                            agent_capabilities=list(self.agent.agent_capabilities),
+                        ),
+                        transcript=[],  # resolver._resolve_peer doesn't use transcript directly
+                        consensus=Consensus(
+                            summary=result.metadata.get("solution", "AutoGen discussion completed"),
+                            actionable_suggestion=result.metadata.get("solution", msg),
+                            confidence=result.metadata.get("consensus_confidence", 0.7),
+                            agreement_ratio=result.metadata.get("consensus_agreement", 0.8),
+                        ),
+                        duration_seconds=result.metadata.get("discussion_duration_seconds", 0.0),
+                    )
+                # Otherwise, AutoGen failed — fall through to legacy
+            except Exception as e:
+                logger.warning(f"AutoGen discussion failed, falling back: {e}")
+
+        # Legacy fallback
+        from agent_system.core.mixins.discussion import DiscussionContext
         ctx = DiscussionContext(
             task_id=task.task_id,
             task_input=task.input,
             error=str(error),
-            capability_hint=analysis.error_summary[:100],
-            agent_capabilities=list(self.agent_capabilities),
+            capability_hint=analysis.error_summary[:100] if analysis.error_summary else "",
+            agent_capabilities=list(self.agent.agent_capabilities),
             max_participants=2,
             timeout_seconds=20.0,
         )

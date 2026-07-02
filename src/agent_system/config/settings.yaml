@@ -8,26 +8,34 @@ system:
 
 llm:
   default:
-    model: "claude-sonnet-4-20250514"
+    model: "deepseek-chat"
     max_tokens: 4096
     temperature: 0.7
   fast:
-    model: "claude-haiku-4-5-20251001"
+    model: "deepseek-chat"
     max_tokens: 2048
     temperature: 0.3
   agents:
     product_agent:
-      model: "claude-sonnet-4-20250514"
+      model: "deepseek-chat"
       max_tokens: 4096
       temperature: 0.7
     tech_agent:
-      model: "claude-sonnet-4-20250514"
+      model: "deepseek-chat"
       max_tokens: 4096
       temperature: 0.5
     test_agent:
-      model: "claude-haiku-4-5-20251001"
+      model: "deepseek-chat"
       max_tokens: 4096
       temperature: 0.3
+    ceo_agent:
+      model: "deepseek-chat"
+      max_tokens: 4096
+      temperature: 0.5
+    deploy_agent:
+      model: "deepseek-chat"
+      max_tokens: 4096
+      temperature: 0.5
 
 mcp_servers:
   filesystem:
