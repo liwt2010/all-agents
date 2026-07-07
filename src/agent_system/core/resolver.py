@@ -454,35 +454,35 @@ class SmartResolver:
         """Find peer agents relevant to this problem.
 
         Selection strategy:
-          - Match by error keywords vs capability overlap
-          - Exclude the original agent
+          - All @register_agent decorated agents (via AgentRegistry), excluding self
+          - Rank by capability-overlap with the error text
           - Return at most 3 peers (cost-conscious)
-        """
-        from agent_system.agents.product_agent import ProductAgent
-        from agent_system.agents.tech_agent import TechAgent
-        from agent_system.agents.test_agent import TestAgent
 
-        all_peers = [
-            ("product_agent", ProductAgent()),
-            ("tech_agent", TechAgent()),
-            ("test_agent", TestAgent()),
-        ]
-        # Filter out self
-        peers = [(n, a) for n, a in all_peers if n != self.agent.agent_name]
+        Adding a new agent class no longer requires editing this method.
+        """
+        from agent_system.core.registry import agent_registry
+
+        # Discover peers via the global registry — no hardcoded agent list.
+        peer_names = agent_registry.names_excluding(self.agent.agent_name)
+        peers: List[Tuple[str, SmartAgent]] = []
+        for name in peer_names:
+            instance = agent_registry.get_instance(name)
+            if instance is not None:
+                peers.append((name, instance))
 
         # Rank by capability-overlap with error text
         error_lower = analysis.error_summary.lower()
 
         def relevance_score(peer_agent: SmartAgent) -> int:
             score = 0
-            for cap in peer_agent.agent_capabilities:
+            for cap in (peer_agent.agent_capabilities or []):
                 for word in cap.lower().split():
                     if len(word) > 4 and word in error_lower:
                         score += 1
             return score
 
         peers.sort(key=lambda p: relevance_score(p[1]), reverse=True)
-        return peers[:2]  # Top 2 peers (cost-conscious)
+        return peers[:3]  # Top 3 peers (was 2; registry opens more peers)
 
     def _extract_solution_from_discussion(self, discussion: List[Dict[str, Any]]) -> str:
         """Extract the original agent's refined approach as the solution."""
@@ -552,26 +552,20 @@ class _PeerDiscussionAdapter:
         self._setup_default_peers(original_agent)
 
     def _setup_default_peers(self, original_agent: SmartAgent):
-        from agent_system.agents.product_agent import ProductAgent
-        from agent_system.agents.tech_agent import TechAgent
-        from agent_system.agents.test_agent import TestAgent
-        from agent_system.agents.deploy_agent import DeployAgent
-        from agent_system.agents.ceo_agent import CEOAgent
+        """Register all @register_agent-decorated agents as default peers, except self."""
         from agent_system.core.mixins.discussion import PeerProvider
+        from agent_system.core.registry import agent_registry
 
-        peer_configs = [
-            ("product_agent", ProductAgent),
-            ("tech_agent", TechAgent),
-            ("test_agent", TestAgent),
-            ("deploy_agent", DeployAgent),
-            ("ceo_agent", CEOAgent),
-        ]
-
-        for name, cls in peer_configs:
-            if name == original_agent.agent_name:
+        # Auto-discover via the global registry — no hardcoded agent list.
+        for name in agent_registry.names_excluding(original_agent.agent_name):
+            cls = agent_registry.get_class(name)
+            if cls is None:
                 continue
-            sample = cls()
-            caps = list(sample.agent_capabilities)
+            try:
+                sample = cls()
+            except Exception:
+                continue
+            caps = list(sample.agent_capabilities or [])
             provider = self._make_peer_provider(name, cls, caps)
             self.register_peer(name, provider)
 

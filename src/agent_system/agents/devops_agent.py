@@ -14,10 +14,12 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import Field
 
+from agent_system.core.registry import register_agent
 from agent_system.core.agent import SmartAgent, TaskContext
 from agent_system.core.schema import OutputSchema, NextStep
 
 
+@register_agent
 class DevOpsAgent(SmartAgent):
 
     agent_name: str = "devops_agent"

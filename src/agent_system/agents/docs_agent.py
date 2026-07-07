@@ -9,10 +9,12 @@ changelog maintenance.
 import json
 from datetime import datetime, timezone
 
+from agent_system.core.registry import register_agent
 from agent_system.core.agent import SmartAgent, TaskContext
 from agent_system.core.schema import OutputSchema, NextStep
 
 
+@register_agent
 class DocsAgent(SmartAgent):
 
     agent_name: str = "docs_agent"

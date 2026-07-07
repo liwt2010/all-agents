@@ -20,6 +20,7 @@ from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field
 
+from agent_system.core.registry import register_agent
 from agent_system.core.agent import SmartAgent, TaskContext
 from agent_system.core.schema import OutputSchema, NextStep
 
@@ -53,6 +54,7 @@ class RollbackPlan(BaseModel):
     max_rollback_time_seconds: int = 600
 
 
+@register_agent
 class DeployAgent(SmartAgent):
     """5th core agent: deployment planning and execution."""
 

@@ -6,10 +6,12 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from agent_system.core.registry import register_agent
 from agent_system.core.agent import SmartAgent, TaskContext
 from agent_system.core.schema import OutputSchema, NextStep
 
 
+@register_agent
 class TechAgent(SmartAgent):
 
     agent_name: str = "tech_agent"

@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
+from agent_system.core.registry import register_agent
 from agent_system.core.agent import SmartAgent, TaskContext, event_bus, EventType, AgentEvent
 from agent_system.core.schema import OutputSchema, NextStep
 from agent_system.core.resolver import ResolutionPath, ResolutionStatus
@@ -112,6 +113,7 @@ class CEOEscalationHandler:
         return None
 
 
+@register_agent
 class CEOAgent(SmartAgent):
     """CEO Agent — orchestrates multi-agent workflows and handles escalations"""
 

@@ -7,11 +7,13 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from agent_system.core.registry import register_agent
 from agent_system.core.agent import SmartAgent, TaskContext
 from agent_system.core.schema import OutputSchema, NextStep
 from agent_system.core.llm_router import router as default_router
 
 
+@register_agent
 class ProductAgent(SmartAgent):
 
     agent_name: str = "product_agent"
