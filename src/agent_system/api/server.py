@@ -509,6 +509,37 @@ async def metrics_prometheus_text():
     )
 
 
+# ── Audit query endpoint (PR-11) ──
+
+@app.get("/api/audit/query")
+async def query_audit(
+    user_id: Optional[str] = None,
+    action: Optional[str] = None,
+    outcome: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    request_id: Optional[str] = None,
+    limit: int = Query(default=100, le=1000),
+    user: User = Depends(require_auth(_auth_service)),
+):
+    """Query audit log (admin only). Returns up to `limit` matching entries."""
+    from agent_system.core.audit_logger import get_audit_logger
+    audit = get_audit_logger()
+    entries = audit.query_from_disk(
+        user_id=user_id,
+        action=action,
+        outcome=outcome,
+        start_date=start_date,
+        end_date=end_date,
+        request_id=request_id,
+        limit=limit,
+    )
+    return {
+        "count": len(entries),
+        "entries": [e.model_dump(mode="json") for e in entries],
+    }
+
+
 @app.get("/api/tasks/{task_id}/progress", response_model=LiveProgress)
 async def get_task_progress(
     task_id: str,
