@@ -368,3 +368,122 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             return response
         finally:
             _request_id_var.reset(token)
+# ─────────────────────────────────────────────────────────────────────────────
+# PR-12: Per-user / per-scope sliding window rate limiter
+# ─────────────────────────────────────────────────────────────────────────────
+
+import logging as _rl_logging
+from agent_system.core.rate_limit import (
+    get_limiter_registry,
+    classify_scope,
+)
+
+_rl_logger = _rl_logging.getLogger(__name__)
+
+
+class SlidingWindowRateLimitMiddleware(BaseHTTPMiddleware):
+    """
+    Per-user + per-IP + per-scope rate limiting with X-RateLimit-* headers.
+
+    Replaces the old IP-only RateLimitMiddleware for new deployments.
+    Can be enabled/disabled via env AGENT_RATE_LIMIT_ENABLED=true|false
+    (default: true).
+
+    When enabled:
+      - Resolves user_id from request.state (set by AuthMiddleware) if present
+      - Otherwise falls back to IP-only
+      - Determines scope from path
+      - Checks user + IP limiters for the scope
+      - If any fails, returns 429 with Retry-After + X-RateLimit-* headers
+      - On success, attaches X-RateLimit-* headers to the response
+
+    Fail-open on internal errors (so a buggy limiter never takes down the API).
+    """
+
+    DEFAULT_EXEMPT_PATHS = {"/api/health", "/api/ready", "/metrics"}
+
+    def __init__(
+        self,
+        app,
+        enabled: bool = True,
+        fail_mode: str = "open",
+        exempt_paths: Optional[list] = None,
+    ):
+        super().__init__(app)
+        self.enabled = enabled
+        self.fail_mode = fail_mode  # "open" = allow on error, "closed" = reject on error
+        self.exempt_paths = set(exempt_paths or self.DEFAULT_EXEMPT_PATHS)
+
+    async def dispatch(self, request, call_next):
+        if not self.enabled:
+            return await call_next(request)
+
+        if request.url.path in self.exempt_paths:
+            return await call_next(request)
+
+        user_id = None
+        try:
+            user = getattr(request.state, "user", None)
+            if user is not None:
+                user_id = getattr(user, "user_id", None)
+        except Exception:
+            pass
+
+        ip = request.client.host if request.client else "unknown"
+        scope = classify_scope(request.url.path)
+
+        try:
+            registry = get_limiter_registry()
+            allowed, decision, dimension = registry.check_request(user_id, ip, scope)
+        except Exception as e:
+            _rl_logger.warning(f"Rate limiter error (fail-{self.fail_mode}): {e}")
+            if self.fail_mode == "closed":
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": "rate_limiter_unavailable",
+                             "message": "Service temporarily unavailable"},
+                )
+            return await call_next(request)
+
+        if not allowed:
+            retry_after = max(1, int(decision.retry_after) + 1)
+            headers = {
+                "X-RateLimit-Limit": str(self._limit_for(decision)),
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": str(int(decision.reset_at)),
+                "X-RateLimit-Scope": scope,
+                "X-RateLimit-Dimension": dimension,
+                "Retry-After": str(retry_after),
+            }
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "rate_limited",
+                    "message": f"Too many requests. Retry after {retry_after}s.",
+                    "scope": scope,
+                    "dimension": dimension,
+                },
+                headers=headers,
+            )
+
+        # Allowed — call next, then attach headers to response
+        response = await call_next(request)
+        try:
+            response.headers["X-RateLimit-Limit"] = str(self._limit_for(decision))
+            response.headers["X-RateLimit-Remaining"] = str(decision.remaining)
+            response.headers["X-RateLimit-Reset"] = str(int(decision.reset_at))
+            response.headers["X-RateLimit-Scope"] = scope
+        except Exception:
+            pass
+        return response
+
+    def _limit_for(self, decision) -> int:
+        # Look up the configured limit for the scope; fall back to decision remaining cap
+        try:
+            registry = get_limiter_registry()
+            cfg = registry.scopes.get(decision.scope, registry.scopes.get("default"))
+            # We don't know which dimension triggered; report the per-user limit
+            # as the canonical "your limit" for the scope.
+            return cfg.user_limit
+        except Exception:
+            return 0

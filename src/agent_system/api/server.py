@@ -52,6 +52,7 @@ from agent_system.core.security_middleware import (
     RequestIDMiddleware,
 )
 from agent_system.core.metrics_middleware import MetricsMiddleware
+from agent_system.core.security_middleware import SlidingWindowRateLimitMiddleware
 from agent_system.storage.task_store import TaskRecord, get_task_store
 
 logger = logging.getLogger(__name__)
@@ -116,9 +117,14 @@ app.add_middleware(MetricsMiddleware)
 # security headers. Disabled in tests by default; enable in production.
 if os.environ.get("DISABLE_SECURITY_MIDDLEWARE") != "1":
     app.add_middleware(SecurityHeadersMiddleware, is_production=os.environ.get("ENVIRONMENT") == "production")
-    app.add_middleware(RateLimitMiddleware, rate_per_minute=int(os.environ.get("RATE_LIMIT_PER_MINUTE", "60")))
     app.add_middleware(RequestSizeLimitMiddleware, max_bytes=int(os.environ.get("MAX_REQUEST_BYTES", str(1024 * 1024))))
     app.add_middleware(SecretsInRequestMiddleware)
+    # PR-12: per-user + per-scope sliding window rate limiter (replaces IP-only)
+    if os.environ.get("AGENT_RATE_LIMIT_ENABLED", "true").lower() in ("1", "true", "yes"):
+        app.add_middleware(SlidingWindowRateLimitMiddleware)
+    else:
+        # Legacy IP-only limiter as fallback
+        app.add_middleware(RateLimitMiddleware, rate_per_minute=int(os.environ.get("RATE_LIMIT_PER_MINUTE", "60")))
 
 # CORS — narrowed to actual production domains.
 # In dev, CORS_DEV_ORIGINS env var (comma-separated) extends this.
