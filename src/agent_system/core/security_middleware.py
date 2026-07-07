@@ -6,14 +6,17 @@ Security middleware — production hardening
   - Request body size limit
   - Generic error responses (no internal details leaked)
   - Secrets detection in inputs
+  - Request ID propagation (X-Request-ID) — for log correlation
 """
 
 import asyncio
 import logging
 import re
 import time
+import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Optional
 
@@ -22,6 +25,15 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
+
+# Context var so downstream code (logging, audit, events) can attach the same request_id
+# without threading it through every function signature.
+_request_id_var: ContextVar[Optional[str]] = ContextVar("_request_id_var", default=None)
+
+
+def get_request_id() -> Optional[str]:
+    """Return the current request's ID, or None outside a request context."""
+    return _request_id_var.get()
 
 
 # ── Security headers ──
@@ -311,3 +323,48 @@ def mask_internal_error(exc: Exception) -> Dict[str, Any]:
         "error": "internal_error",
         "message": "An unexpected error occurred. Please contact support.",
     }
+
+
+# ── Request ID propagation ──
+
+REQUEST_ID_HEADER = "X-Request-ID"
+_REQUEST_ID_MAX_LEN = 128
+_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9_\-]+$")
+
+
+def _sanitize_request_id(value: Optional[str]) -> Optional[str]:
+    """Validate an incoming X-Request-ID. Reject anything not [A-Za-z0-9_-]{<=128}."""
+    if value is None:
+        return None
+    value = value.strip()
+    if not value or len(value) > _REQUEST_ID_MAX_LEN:
+        return None
+    if not _REQUEST_ID_PATTERN.match(value):
+        return None
+    return value
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Assign / propagate an X-Request-ID for each request.
+
+    Behavior:
+      - If the client sends X-Request-ID and it passes sanitization, reuse it.
+      - Otherwise generate a fresh UUID4.
+      - Expose it as `request.state.request_id` and a contextvar (`get_request_id()`)
+        so logs/audit/events can correlate.
+      - Echo it back on the response as X-Request-ID.
+
+    Skips for non-HTTP (e.g. WebSocket upgrade) traffic.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        incoming = _sanitize_request_id(request.headers.get(REQUEST_ID_HEADER))
+        request_id = incoming or uuid.uuid4().hex
+        request.state.request_id = request_id
+        token = _request_id_var.set(request_id)
+        try:
+            response = await call_next(request)
+            response.headers[REQUEST_ID_HEADER] = request_id
+            return response
+        finally:
+            _request_id_var.reset(token)

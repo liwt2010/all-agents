@@ -49,6 +49,7 @@ from agent_system.core.auth import (
 from agent_system.core.security_middleware import (
     SecurityHeadersMiddleware, RateLimitMiddleware,
     RequestSizeLimitMiddleware, SecretsInRequestMiddleware,
+    RequestIDMiddleware,
 )
 from agent_system.storage.task_store import TaskRecord, get_task_store
 
@@ -101,6 +102,10 @@ app = FastAPI(
 
 # Wire auth: extracts User from Authorization header and sets TenantContext
 app.add_middleware(AuthMiddleware, auth_service=_auth_service)
+
+# Request ID propagation — must be added BEFORE logging middleware so the ID
+# is available to anything downstream that touches the request lifecycle.
+app.add_middleware(RequestIDMiddleware)
 
 # Security middleware: rate limit, request size cap, secrets detection,
 # security headers. Disabled in tests by default; enable in production.
