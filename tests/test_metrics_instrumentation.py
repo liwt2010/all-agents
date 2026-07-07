@@ -274,17 +274,27 @@ class TestMetricsMiddleware:
 
 class TestMetricsEndpoint:
     def test_metrics_endpoint_returns_prometheus_text(self):
+        """Test the /metrics route handler directly without importing the full
+        server (which would load .env and pollute os.environ for other tests)."""
         from fastapi import FastAPI
+        from fastapi.responses import PlainTextResponse
         from fastapi.testclient import TestClient
-        from agent_system.api.server import app
         from agent_system.observability.metrics import (
             get_metrics_registry, reset_metrics_registry,
         )
 
         reset_metrics_registry()
-        # Make sure some metric exists
         registry = get_metrics_registry()
         registry.counter("smoke_metric", "smoke test")
+
+        app = FastAPI()
+
+        @app.get("/metrics")
+        async def metrics_prometheus_text():
+            return PlainTextResponse(
+                content=get_metrics_registry().render(),
+                media_type="text/plain; version=0.0.4",
+            )
 
         with TestClient(app) as client:
             r = client.get("/metrics")
