@@ -13,6 +13,7 @@ Decision flow:
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -520,9 +521,12 @@ class _PeerDiscussionAdapter:
         self.agent = original_agent
         # Lazy import: try AutoGen first, fall back to DiscussionMixin
         self._use_autogen = True
+        self._has_autogen = False
         try:
             from agent_system.core.autogen_discussion import AutoGenGroupChat, HAS_AUTOGEN
-            self._has_autogen = HAS_AUTOGEN
+            # Only use AutoGen if the package is installed AND an API key is configured.
+            api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+            self._has_autogen = HAS_AUTOGEN and bool(api_key)
         except ImportError:
             self._has_autogen = False
         if not self._has_autogen:

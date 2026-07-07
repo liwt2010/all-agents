@@ -26,7 +26,8 @@ from agent_system.core.mixins.discussion import (
     DiscussionResult, DiscussionRole,
 )
 from agent_system.core.resolver import ResolutionResult, ResolutionStatus
-from agent_system.core.event_bus import event_bus, EventType, AgentEvent
+from agent_system.core.agent import EventType, AgentEvent
+from agent_system.core.event_bus import event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ try:
     from autogen_agentchat.agents import AssistantAgent
     from autogen_agentchat.teams import RoundRobinGroupChat
     from autogen_agentchat.messages import TextMessage
-    from autogen_agentchat.base._task import TaskResult
+    from autogen_agentchat.base import TaskResult
     from autogen_ext.models.openai import OpenAIChatCompletionClient
     HAS_AUTOGEN = True
 except ImportError as e:
