@@ -233,3 +233,116 @@ def vacuum_archived(retention_days: int = 365, base_dir: Optional[Path] = None) 
         except Exception as e:
             logger.warning(f"Failed to vacuum {f}: {e}")
     return deleted
+# ─────────────────────────────────────────────────────────────────────────────
+# PR-9: Pluggable storage backend facade
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# The legacy module-level functions above remain unchanged for backwards
+# compatibility. New code should use `StorageManager` which dispatches to
+# the appropriate backend (json / sqlite / postgres) based on settings.
+#
+
+from agent_system.memory.storage import get_storage, GraphStorage  # noqa: E402
+
+
+class StorageManager:
+    """
+    Process-wide storage facade for MultiLinkGraph persistence.
+
+    Backwards-compatible with the legacy `save_node(node)` / `load_node(id)` /
+    `save_graph(graph)` / `load_graph()` style: each method returns the same
+    type as the legacy function, but delegates to the configured backend.
+
+    Example:
+        mgr = StorageManager()        # uses AGENT_STORAGE_BACKEND env var
+        mgr.init()
+        mgr.save_node(node)
+        g = mgr.load_graph()
+
+    Or pick a backend explicitly:
+        mgr = StorageManager(backend="postgres", host="prod-db")
+    """
+
+    _instance: "StorageManager | None" = None
+
+    def __init__(
+        self,
+        backend: Optional[str] = None,
+        **kwargs,
+    ):
+        self._backend: GraphStorage = get_storage(backend, **kwargs)
+
+    @classmethod
+    def instance(cls) -> "StorageManager":
+        """Process-wide singleton (lazy init)."""
+        if cls._instance is None:
+            cls._instance = cls()
+            cls._instance._backend.init()
+        return cls._instance
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Drop the singleton (used in tests after env var change)."""
+        if cls._instance is not None:
+            try:
+                cls._instance._backend.close()
+            except Exception:
+                pass
+        cls._instance = None
+
+    @property
+    def backend(self) -> GraphStorage:
+        return self._backend
+
+    def init(self) -> None:
+        """Idempotent schema init."""
+        self._backend.init()
+
+    def close(self) -> None:
+        """Release backend resources."""
+        self._backend.close()
+
+    # ── Node API (matches legacy module-level functions) ──
+
+    def save_node(self, node: GraphNode) -> bool:
+        try:
+            self._backend.save_node(node)
+            return True
+        except Exception as e:
+            logger.error(f"StorageManager.save_node({node.id}) failed: {e}")
+            return False
+
+    def load_node(self, node_id: str) -> Optional[GraphNode]:
+        return self._backend.load_node(node_id)
+
+    def delete_node(self, node_id: str) -> bool:
+        return self._backend.delete_node(node_id)
+
+    # ── Link API ──
+
+    def save_link(self, link: GraphLink) -> bool:
+        try:
+            self._backend.save_link(link)
+            return True
+        except Exception as e:
+            logger.error(f"StorageManager.save_link failed: {e}")
+            return False
+
+    # ── Bulk API ──
+
+    def save_graph(self, graph: MultiLinkGraph) -> int:
+        return self._backend.save_graph(graph)
+
+    def load_graph(self) -> MultiLinkGraph:
+        """Load entire graph into a fresh MultiLinkGraph."""
+        graph = MultiLinkGraph()
+        self._backend.load_graph(graph)
+        return graph
+
+    # ── Health ──
+
+    def ping(self) -> bool:
+        return self._backend.ping()
+
+    def backend_name(self) -> str:
+        return self._backend.backend_name()
