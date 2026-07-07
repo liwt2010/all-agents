@@ -568,3 +568,29 @@ def reset_graph():
     global _graph
     _graph = MultiLinkGraph()
     return _graph
+
+
+# ── Dataview integration (PR 1) ─────────────────────────────────────
+# Thin wrapper so callers can do `graph.query("SELECT ...")`.
+
+def query(self_or_sql, sql: Optional[str] = None) -> Any:
+    """Dataview query convenience method.
+
+    Two call styles:
+        graph.query("SELECT ...")           # positional SQL
+        graph.query(sql="SELECT ...")       # keyword arg
+
+    Returns a QueryResult from agent_system.core.dataview.
+    """
+    if isinstance(self_or_sql, MultiLinkGraph):
+        graph = self_or_sql
+        sql_str = sql
+    else:
+        graph = None
+        sql_str = self_or_sql
+    from agent_system.core.dataview import query as _dataview_query
+    return _dataview_query(sql_str, graph=graph)
+
+
+# Attach to MultiLinkGraph as instance method
+MultiLinkGraph.query = query  # type: ignore[attr-defined]

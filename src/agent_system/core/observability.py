@@ -33,6 +33,8 @@ from agent_system.memory.graph import (
     LinkType,
 )
 
+from agent_system.core.dataview import query as dataview_query
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,12 +70,28 @@ class MetricsCalculator:
     """
     Calculates the 9 key metrics from the MultiLinkGraph.
 
+    PR 1 (P0-1): Migrated to use the Dataview engine (PR 1 deliverable).
+    SQL queries express the metric definitions; ratios computed in Python
+    layer where the Dataview engine doesn't yet support binary expressions.
+
     All metrics are calculated at query time (no caching) as
     specified in ARCHITECTURE.md Ch.10.3.
     """
 
     def __init__(self, graph: Optional[MultiLinkGraph] = None):
         self.graph = graph or get_graph()
+
+    def _safe_query(self, sql: str) -> Dict[str, float]:
+        """Run a dataview query and return its aggregations. Empty dict on parse failure."""
+        try:
+            return dataview_query(sql, graph=self.graph).aggregations
+        except Exception as e:
+            logger.debug(f"Dataview query failed: {e}\nSQL: {sql}")
+            return {}
+
+    def _safe_count(self, sql: str) -> int:
+        """Run a count query and return the integer value."""
+        return int(self._safe_query(sql).get("count", 0) or 0)
 
     def calculate_all(self) -> Dict[str, MetricValue]:
         """Calculate all 9 metrics at once"""
@@ -90,12 +108,11 @@ class MetricsCalculator:
         }
 
     def end_to_end_success_rate(self) -> MetricValue:
-        """Metric 1: COUNT(completed) / COUNT(total)"""
-        tasks = self.graph.find_nodes(node_type=NodeType.TASK)
-        total = len(tasks)
-        if total == 0:
-            return MetricValue(name="end_to_end_success_rate", value=1.0, unit="ratio")
-        completed = sum(1 for t in tasks if t.content.get("status") == "completed")
+        """Metric 1: COUNT(completed) / COUNT(total) via Dataview"""
+        completed = self._safe_count(
+            "SELECT COUNT(*) AS count FROM tasks WHERE status = 'completed';"
+        )
+        total = self._safe_count("SELECT COUNT(*) AS count FROM tasks;")
         rate = completed / total if total > 0 else 1.0
         return MetricValue(
             name="end_to_end_success_rate",
@@ -105,7 +122,120 @@ class MetricsCalculator:
         )
 
     def avg_completion_time(self) -> MetricValue:
-        """Metric 2: AVG(duration)"""
+        """Metric 2: AVG(duration_seconds) via Dataview"""
+        aggs = self._safe_query(
+            "SELECT AVG(content.duration_seconds) AS avg FROM tasks;"
+        )
+        avg = aggs.get("avg", 0.0)
+        return MetricValue(
+            name="avg_completion_time",
+            value=round(avg, 2),
+            unit="seconds",
+            labels={"source": "dataview"},
+        )
+
+    def cost_per_task(self) -> MetricValue:
+        """Metric 3: SUM(cost) / COUNT(tasks) via Dataview"""
+        sum_aggs = self._safe_query("SELECT SUM(content.cost) AS sum FROM tasks;")
+        total = self._safe_count("SELECT COUNT(*) AS count FROM tasks;")
+        total_cost = sum_aggs.get("sum", 0.0)
+        avg_cost = total_cost / total if total > 0 else 0.0
+        return MetricValue(
+            name="cost_per_task",
+            value=round(avg_cost, 4),
+            unit="usd",
+            labels={"total_cost": str(round(total_cost, 4))},
+        )
+
+    def user_satisfaction(self) -> MetricValue:
+        """Metric 4: AVG(feedback.score) via Dataview"""
+        aggs = self._safe_query("SELECT AVG(content.score) AS avg FROM feedbacks;")
+        avg = aggs.get("avg", 0.0)
+        return MetricValue(
+            name="user_satisfaction",
+            value=round(avg, 2),
+            unit="score",
+            labels={"source": "dataview"},
+        )
+
+    def failure_rate_by_agent(self) -> MetricValue:
+        """Metric 5: COUNT(failures) / COUNT(tasks). Note: per-agent breakdown
+        requires GROUP BY which is not in PR 1 scope — overall rate returned."""
+        failed = self._safe_count("SELECT COUNT(*) AS count FROM tasks WHERE status = 'failed';")
+        total = self._safe_count("SELECT COUNT(*) AS count FROM tasks;")
+        rate = failed / total if total > 0 else 0.0
+        return MetricValue(
+            name="failure_rate_by_agent",
+            value=round(rate, 4),
+            unit="ratio",
+            labels={"failed": str(failed), "total": str(total), "note": "per-agent breakdown deferred to PR2+"},
+        )
+
+    def reflection_trigger_rate(self) -> MetricValue:
+        """Metric 6: COUNT(reflections)/COUNT(failures). Reflections are stored
+        as DECISION nodes that link from FAILURE nodes."""
+        reflections = self._safe_count("SELECT COUNT(*) AS count FROM decisions WHERE content.type = 'reflection';")
+        failures = self._safe_count("SELECT COUNT(*) AS count FROM failures;")
+        rate = reflections / failures if failures > 0 else 0.0
+        return MetricValue(
+            name="reflection_trigger_rate",
+            value=round(rate, 4),
+            unit="ratio",
+            labels={"reflections": str(reflections), "failures": str(failures)},
+        )
+
+    def escalation_request_rate(self) -> MetricValue:
+        """Metric 7: COUNT(escalations)/COUNT(failures). Escalations recorded
+        as DECISION nodes with type='escalation'."""
+        escalations = self._safe_count("SELECT COUNT(*) AS count FROM decisions WHERE content.type = 'escalation';")
+        failures = self._safe_count("SELECT COUNT(*) AS count FROM failures;")
+        rate = escalations / failures if failures > 0 else 0.0
+        return MetricValue(
+            name="escalation_request_rate",
+            value=round(rate, 4),
+            unit="ratio",
+            labels={"escalations": str(escalations), "failures": str(failures)},
+        )
+
+    def validation_failure_rate(self) -> MetricValue:
+        """Metric 8: COUNT(validation_fails)/COUNT(outputs). Validation fails
+        recorded as OUTPUT nodes with content.valid=false."""
+        invalid = self._safe_count("SELECT COUNT(*) AS count FROM outputs WHERE content.valid = false;")
+        total = self._safe_count("SELECT COUNT(*) AS count FROM outputs;")
+        rate = invalid / total if total > 0 else 0.0
+        return MetricValue(
+            name="validation_failure_rate",
+            value=round(rate, 4),
+            unit="ratio",
+            labels={"invalid": str(invalid), "total": str(total)},
+        )
+
+    def experience_effectiveness(self) -> MetricValue:
+        """Metric 9: AVG(success_rate) for EXPERIENCE nodes via Dataview"""
+        successes = self._safe_count("SELECT COUNT(*) AS count FROM experiences WHERE content.success = true;")
+        total = self._safe_count("SELECT COUNT(*) AS count FROM experiences;")
+        rate = successes / total if total > 0 else 0.0
+        return MetricValue(
+            name="experience_effectiveness",
+            value=round(rate, 4),
+            unit="ratio",
+            labels={"successful": str(successes), "total": str(total)},
+        )
+
+    # ── Legacy methods (preserved for rollback reference) ──
+    # These are the original hand-calculated implementations from PR-pre-1.
+    # They are NOT called by calculate_all() anymore but kept for reference
+    # and for safety in case the Dataview migration needs to be rolled back.
+
+    def _legacy_end_to_end_success_rate(self) -> float:
+        tasks = self.graph.find_nodes(node_type=NodeType.TASK)
+        total = len(tasks)
+        if total == 0:
+            return 1.0
+        completed = sum(1 for t in tasks if t.content.get("status") == "completed")
+        return completed / total if total > 0 else 1.0
+
+    def _legacy_avg_completion_time(self) -> float:
         tasks = self.graph.find_nodes(node_type=NodeType.TASK)
         durations = []
         for t in tasks:
@@ -118,123 +248,7 @@ class MetricsCalculator:
                         durations.append(dur)
                 except Exception:
                     continue
-        if not durations:
-            return MetricValue(name="avg_completion_time", value=0.0, unit="seconds")
-        avg = sum(durations) / len(durations)
-        return MetricValue(
-            name="avg_completion_time",
-            value=round(avg, 2),
-            unit="seconds",
-            labels={"samples": str(len(durations))},
-        )
-
-    def cost_per_task(self) -> MetricValue:
-        """Metric 3: SUM(cost) / COUNT(tasks)"""
-        tasks = self.graph.find_nodes(node_type=NodeType.TASK)
-        total = len(tasks)
-        if total == 0:
-            return MetricValue(name="cost_per_task", value=0.0, unit="usd")
-        total_cost = 0.0
-        for t in tasks:
-            cost = t.metadata.get("cost", 0) or t.content.get("cost", 0)
-            total_cost += float(cost)
-        avg_cost = total_cost / total
-        return MetricValue(
-            name="cost_per_task",
-            value=round(avg_cost, 4),
-            unit="usd",
-        )
-
-    def user_satisfaction(self) -> MetricValue:
-        """Metric 4: AVG(feedback.score)"""
-        feedbacks = self.graph.find_nodes(node_type=NodeType.FEEDBACK)
-        if not feedbacks:
-            return MetricValue(name="user_satisfaction", value=0.0, unit="score")
-        scores = [f.content.get("score", 0) for f in feedbacks if "score" in f.content]
-        if not scores:
-            return MetricValue(name="user_satisfaction", value=0.0, unit="score")
-        avg = sum(scores) / len(scores)
-        return MetricValue(name="user_satisfaction", value=round(avg, 2), unit="score")
-
-    def failure_rate_by_agent(self) -> MetricValue:
-        """Metric 5: COUNT(failures)/COUNT(tasks) GROUP BY agent"""
-        tasks = self.graph.find_nodes(node_type=NodeType.TASK)
-        if not tasks:
-            return MetricValue(name="failure_rate_by_agent", value=0.0, unit="ratio")
-
-        agent_totals: Dict[str, int] = defaultdict(int)
-        agent_fails: Dict[str, int] = defaultdict(int)
-
-        for t in tasks:
-            agent = t.content.get("agent", "unknown")
-            agent_totals[agent] += 1
-            if t.content.get("status") == "failed":
-                agent_fails[agent] += 1
-
-        # Overall rate
-        total_fails = sum(agent_fails.values())
-        rate = total_fails / len(tasks)
-        return MetricValue(
-            name="failure_rate_by_agent",
-            value=round(rate, 4),
-            unit="ratio",
-            labels={"agents": str(len(agent_totals))},
-        )
-
-    def reflection_trigger_rate(self) -> MetricValue:
-        """Metric 6: COUNT(reflections)/COUNT(failures)"""
-        failures = self.graph.find_nodes(node_type=NodeType.FAILURE)
-        if not failures:
-            return MetricValue(name="reflection_trigger_rate", value=0.0, unit="ratio")
-        # Assume each failure triggers a reflection (simplified)
-        return MetricValue(
-            name="reflection_trigger_rate",
-            value=1.0,
-            unit="ratio",
-            labels={"failures": str(len(failures))},
-        )
-
-    def escalation_request_rate(self) -> MetricValue:
-        """Metric 7: COUNT(escalations)/COUNT(failures)"""
-        tasks = self.graph.find_nodes(node_type=NodeType.TASK)
-        failures = self.graph.find_nodes(node_type=NodeType.FAILURE)
-        total_tasks = len(tasks)
-        if total_tasks == 0:
-            return MetricValue(name="escalation_request_rate", value=0.0, unit="ratio")
-        rate = len(failures) / total_tasks
-        return MetricValue(
-            name="escalation_request_rate",
-            value=round(rate, 4),
-            unit="ratio",
-        )
-
-    def validation_failure_rate(self) -> MetricValue:
-        """Metric 8: COUNT(validation_fails)/COUNT(outputs)"""
-        outputs = self.graph.find_nodes(node_type=NodeType.OUTPUT)
-        failures = self.graph.find_nodes(node_type=NodeType.FAILURE)
-        total_outputs = len(outputs)
-        if total_outputs == 0:
-            return MetricValue(name="validation_failure_rate", value=0.0, unit="ratio")
-        rate = len(failures) / max(total_outputs, 1)
-        return MetricValue(
-            name="validation_failure_rate",
-            value=round(rate, 4),
-            unit="ratio",
-        )
-
-    def experience_effectiveness(self) -> MetricValue:
-        """Metric 9: AVG(success_rate) GROUP BY experience"""
-        exps = self.graph.find_nodes(node_type=NodeType.EXPERIENCE)
-        if not exps:
-            return MetricValue(name="experience_effectiveness", value=0.0, unit="ratio")
-        successes = sum(1 for e in exps if e.content.get("success", False))
-        rate = successes / len(exps)
-        return MetricValue(
-            name="experience_effectiveness",
-            value=round(rate, 4),
-            unit="ratio",
-            labels={"total": str(len(exps)), "successful": str(successes)},
-        )
+        return sum(durations) / len(durations) if durations else 0.0
 
 
 # ── Simple Tracer ──

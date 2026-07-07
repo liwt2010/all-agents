@@ -22,6 +22,7 @@ from agent_system.core.quota import quota_manager
 from agent_system.core.observability import MetricsCalculator
 from agent_system.core.security import sanitizer
 from agent_system.core.event_bus import event_bus, make_event, EventCategory
+from agent_system.core.dataview import query as dataview_query
 from agent_system.memory.graph import get_graph, NodeType
 from agent_system.memory.persistence import load_graph, save_graph
 from agent_system.memory.experience import install_memory_hooks
@@ -122,8 +123,8 @@ def main():
     asyncio.run(fire())
     console.print(f"  Events received: {received}")
 
-    # ── 7. Metrics ──
-    section("7. Auto-calculated metrics")
+    # ── 7. Metrics via Dataview SQL ──
+    section("7. Auto-calculated metrics (Dataview SQL)")
     calc = MetricsCalculator()
     metrics = calc.calculate_all()
     table = Table()
@@ -132,6 +133,29 @@ def main():
     for name, m in metrics.items():
         table.add_row(name, f"{m.value:.4f} {m.unit}")
     console.print(table)
+
+    # ── 7b. Direct Dataview SQL demo (PR 1) ──
+    section("7b. Direct Dataview SQL — failed tasks")
+    g = get_graph()
+    result = dataview_query(
+        "SELECT id, agent, status FROM tasks WHERE status = 'failed';",
+        graph=g,
+    )
+    table = Table()
+    table.add_column("id", style="cyan")
+    table.add_column("agent", style="white")
+    table.add_column("status", style="yellow")
+    if result.rows:
+        for row in result.rows:
+            table.add_row(
+                str(row.get("id", "")),
+                str(row.get("agent", "")),
+                str(row.get("status", "")),
+            )
+    else:
+        table.add_row("—", "—", "no failed tasks in this run")
+    console.print(table)
+    console.print(f"  [dim]Query took {result.duration_ms}ms, traversed {result.steps_executed} graph operations[/dim]")
 
     # ── 8. Save and reload graph ──
     section("8. Graph persistence")
