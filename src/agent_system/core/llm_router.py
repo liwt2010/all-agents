@@ -235,6 +235,16 @@ class LLMRouter:
             logger.error(f"openai SDK not installed: {e}")
             return None
 
+    def get_api_client(self):
+        """Unified API client getter — returns Anthropic or OpenAI-compatible client based on LLM_PROVIDER env.
+
+        Returns None if the SDK is unavailable or the API key is missing.
+        Used by tests to patch a single entry point.
+        """
+        if self.llm_provider == "openai":
+            return self.get_openai_client()
+        return self.get_anthropic_client()
+
     @staticmethod
     def estimate_complexity(task_input: str) -> str:
         input_len = len(task_input)
@@ -315,7 +325,7 @@ class LLMRouter:
             )
 
         # Anthropic provider
-        client = self.get_anthropic_client()
+        client = self.get_api_client()
         if not client:
             logger.warning("Anthropic SDK not available, falling back to mock")
             return self._mock_response(system_prompt, messages)
