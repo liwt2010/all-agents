@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -51,6 +51,7 @@ from agent_system.core.security_middleware import (
     RequestSizeLimitMiddleware, SecretsInRequestMiddleware,
     RequestIDMiddleware,
 )
+from agent_system.core.metrics_middleware import MetricsMiddleware
 from agent_system.storage.task_store import TaskRecord, get_task_store
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,10 @@ app.add_middleware(AuthMiddleware, auth_service=_auth_service)
 # Request ID propagation — must be added BEFORE logging middleware so the ID
 # is available to anything downstream that touches the request lifecycle.
 app.add_middleware(RequestIDMiddleware)
+
+# Metrics middleware (PR-10): records HTTP request count + duration.
+# Must be added AFTER RequestIDMiddleware so request_id is available.
+app.add_middleware(MetricsMiddleware)
 
 # Security middleware: rate limit, request size cap, secrets detection,
 # security headers. Disabled in tests by default; enable in production.
@@ -483,10 +488,25 @@ async def get_metrics(
 async def get_prometheus_metrics(
     user: User = Depends(require_auth(_auth_service)),
 ):
-    """Get metrics in Prometheus text format."""
+    """Get metrics in Prometheus text format (JSON wrapped)."""
     from agent_system.observability.metrics import get_metrics_registry
     text = get_metrics_registry().render()
     return {"metrics_text": text}
+
+
+@app.get("/metrics", response_class=Response)
+async def metrics_prometheus_text():
+    """Standard Prometheus scrape endpoint (text/plain exposition format).
+
+    Prometheus by default scrapes /metrics. This endpoint is intentionally
+    unauthenticated for scrapers; restrict via network policy in production.
+    """
+    from fastapi.responses import PlainTextResponse
+    from agent_system.observability.metrics import get_metrics_registry
+    return PlainTextResponse(
+        content=get_metrics_registry().render(),
+        media_type="text/plain; version=0.0.4",
+    )
 
 
 @app.get("/api/tasks/{task_id}/progress", response_model=LiveProgress)

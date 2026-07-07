@@ -6,9 +6,26 @@ from agent_system.observability.metrics import (
     Counter, Gauge, Histogram, MetricsRegistry,
     get_metrics_registry, reset_metrics_registry,
 )
+from agent_system.observability.instrumentation import (
+    track_task, track_llm, track_storage,
+    update_memory_node_gauge,
+    HTTP_REQUESTS_TOTAL, HTTP_REQUEST_DURATION,
+    TASKS_TOTAL, TASK_DURATION,
+    LLM_REQUESTS_TOTAL, LLM_TOKENS_TOTAL, LLM_REQUEST_DURATION,
+    STORAGE_OPS_TOTAL, STORAGE_OP_DURATION,
+    ACTIVE_TASKS, MEMORY_NODES_TOTAL,
+)
 
 __all__ = [
     "Span", "Tracer", "get_tracer", "reset_tracer",
     "Counter", "Gauge", "Histogram", "MetricsRegistry",
     "get_metrics_registry", "reset_metrics_registry",
+    "track_task", "track_llm", "track_storage",
+    "update_memory_node_gauge",
+    # metric name constants
+    "HTTP_REQUESTS_TOTAL", "HTTP_REQUEST_DURATION",
+    "TASKS_TOTAL", "TASK_DURATION",
+    "LLM_REQUESTS_TOTAL", "LLM_TOKENS_TOTAL", "LLM_REQUEST_DURATION",
+    "STORAGE_OPS_TOTAL", "STORAGE_OP_DURATION",
+    "ACTIVE_TASKS", "MEMORY_NODES_TOTAL",
 ]

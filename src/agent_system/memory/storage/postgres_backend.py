@@ -26,6 +26,7 @@ from agent_system.memory.graph import (
     LinkType,
     NodeType,
 )
+from agent_system.observability.instrumentation import track_storage
 
 if TYPE_CHECKING:
     from agent_system.memory.graph import MultiLinkGraph
@@ -160,6 +161,7 @@ class PostgresBackend:
 
     # ── Node operations ──
 
+    @track_storage(backend="postgres", op="save_node")
     def save_node(self, node: GraphNode) -> None:
         with self._conn() as conn:
             with conn.cursor() as cur:

@@ -24,6 +24,7 @@ from agent_system.memory.graph import (
     LinkType,
     NodeType,
 )
+from agent_system.observability.instrumentation import track_storage
 
 if TYPE_CHECKING:
     from agent_system.memory.graph import MultiLinkGraph
@@ -142,6 +143,7 @@ class SQLiteBackend:
 
     # ── Node operations ──
 
+    @track_storage(backend="sqlite", op="save_node")
     def save_node(self, node: GraphNode) -> None:
         with self._conn() as conn:
             conn.execute(

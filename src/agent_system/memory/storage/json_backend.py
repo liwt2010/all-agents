@@ -23,6 +23,7 @@ from agent_system.memory.graph import (
     LinkType,
     NodeType,
 )
+from agent_system.observability.instrumentation import track_storage
 
 if TYPE_CHECKING:
     from agent_system.memory.graph import MultiLinkGraph
@@ -62,6 +63,7 @@ class JSONBackend:
 
     # ── Node operations ──
 
+    @track_storage(backend="json", op="save_node")
     def save_node(self, node: GraphNode) -> None:
         path = self._node_path(node)
         path.parent.mkdir(parents=True, exist_ok=True)
