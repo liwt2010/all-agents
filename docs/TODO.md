@@ -132,13 +132,17 @@
 - [x] `774517b` PEER path: AutoGen 0.4+ RoundRobinGroupChat replacing DiscussionMixin + DeepSeek LLM support
 - [x] `ee86ac9` Initial release: Agent System v0.1.0
 - [x] H1 — 清理工作区 (33 个 tmp/output 噪音文件已 trash)
-- [x] **PR 1 — Dataview 引擎** (2026-07-07)
+- [x] **PR 1 — Dataview 引擎** `01b23dd` (2026-07-07)
   - `src/agent_system/core/dataview.py` (~870 行：Tokenizer + Parser + Executor + Builder)
   - `src/agent_system/core/observability.py` (MetricsCalculator 改用 Dataview SQL)
   - `src/agent_system/memory/graph.py` (`graph.query()` 薄包装)
   - `demo.py` 第 7b 步（直接 Dataview SQL demo）
   - `tests/test_dataview.py` — **28 个测试全通过**
   - 9 个核心指标全可达
+- [x] **PR 2 — 拆 execute()** `bd12760` (2026-07-07)
+  - `src/agent_system/core/agent.py` 160 行 execute() → 18 行（拆为 4 个职责单一方法 + 4 个 helper）
+  - 行为不变，dataview 28 测试 + 其他相关 381 测试通过
+  - 注：`test_llm_router.py` 4 个失败是预先存在的（deepseek 配置 + 缺 get_api_client 方法），与本 PR 无关
 
 ## 待办（卫生）
 
