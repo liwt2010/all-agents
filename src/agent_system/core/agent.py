@@ -161,16 +161,30 @@ Begin."""
 
     async def execute(self, task: TaskContext) -> OutputSchema:
         """
-        Full execution loop:
-        1. Start -> publish event + create checkpoint
-        2. Execute do_work() -> catch errors
-        3. Validate output -> pass or retry
-        4. Failure -> retry / escalate
-        5. Final -> checkpoint persists + closed
+        Top-level execution orchestrator. Composes:
+          1. _setup_checkpoint  — create and persist TaskCheckpoint
+          2. _run_with_retry    — main retry loop; returns OutputSchema or raises
+          3. _handle_final_failure — record TASK_FAILED event + persist failed checkpoint
+          4. _escalate          — optional 4-way resolver (SELF/PEER/HUMAN/ESCALATE)
         """
         task.started_at = datetime.now(timezone.utc)
+        checkpoint = self._setup_checkpoint(task)
+        await self._publish_event(EventType.TASK_STARTED, task, {"input_hash": hash(task.input[:200])})
+        try:
+            return await self._run_with_retry(task, checkpoint)
+        except Exception as e:
+            last_error = self._classify_error(e)
+            await self._handle_final_failure(task, checkpoint, last_error)
+            if getattr(self, "_resolver", None):
+                return await self._escalate(task, last_error)
+            raise RuntimeError(
+                f"[{last_error.level.value}] {self.agent_name} failed: {last_error.message}"
+            )
 
-        # Create a checkpoint for this task (ARCHITECTURE.md 12.2)
+    # ── Step 1: Setup checkpoint ──────────────────────────────────
+
+    def _setup_checkpoint(self, task: TaskContext) -> Any:
+        """Create and persist a TaskCheckpoint for the new task."""
         from agent_system.core.failure_ux import (
             TaskCheckpoint,
             StepRecord,
@@ -189,141 +203,156 @@ Begin."""
             timeout_seconds=getattr(task, 'timeout_seconds', None) or 300,
         )
         cp.start()
-        _checkpoint_store = CheckpointStore()
-        _checkpoint_store.save(cp)
+        CheckpointStore().save(cp)
+        return cp
 
-        await event_bus.publish(AgentEvent(
-            event_type=EventType.TASK_STARTED,
-            agent_name=self.agent_name,
-            task_id=task.task_id,
-            data={"input_hash": hash(task.input[:200])},
-        ))
+    # ── Step 2: Main retry loop ──────────────────────────────────
 
+    async def _run_with_retry(self, task: TaskContext, checkpoint: Any) -> OutputSchema:
+        """
+        Loop up to max_retries+1 times. Returns OutputSchema on success.
+        Raises Exception (with .message attribute) on final failure.
+        """
         last_error: Optional[AgentError] = None
-
         for attempt in range(task.max_retries + 1):
+            task.retry_count = attempt
             try:
-                task.retry_count = attempt
                 output = await self.do_work(task)
-
                 v_result = validator.validate(output)
-
                 if v_result.valid:
-                    output.metadata["retry_count"] = attempt
-                    output.metadata["agent_name"] = self.agent_name
-                    task.completed_at = datetime.now(timezone.utc)
-
-                    # Track LLM usage if available
-                    if hasattr(self, '_last_usage') and self._last_usage:
-                        output.metadata["llm_usage"] = self._last_usage.model_dump()
-
-                    await event_bus.publish(AgentEvent(
-                        event_type=EventType.TASK_COMPLETED,
-                        agent_name=self.agent_name,
-                        task_id=task.task_id,
-                        data={"output_id": output.id, "type": output.type},
-                    ))
-                    # Mark checkpoint complete + delete (no resume needed)
-                    cp.complete_step("do_work", output.model_dump(mode="json"))
-                    _checkpoint_store.delete(task.task_id)
-                    return output
-                else:
-                    error_msg = f"Output validation failed: {', '.join(v_result.errors)}"
-                    last_error = AgentError(
-                        level=ErrorLevel.L2_RECOVERABLE,
-                        message=error_msg,
-                        details={"warnings": v_result.warnings},
+                    return await self._on_validation_success(task, checkpoint, output, attempt)
+                # Validation failed — record + decide whether to retry
+                last_error = AgentError(
+                    level=ErrorLevel.L2_RECOVERABLE,
+                    message=f"Output validation failed: {', '.join(v_result.errors)}",
+                    details={"warnings": v_result.warnings},
+                )
+                if attempt < task.max_retries:
+                    await self._publish_event(
+                        EventType.TASK_RETRYING, task,
+                        {"attempt": attempt, "error": last_error.message},
                     )
-                    if attempt < task.max_retries:
-                        await event_bus.publish(AgentEvent(
-                            event_type=EventType.TASK_RETRYING,
-                            agent_name=self.agent_name,
-                            task_id=task.task_id,
-                            data={"attempt": attempt, "error": error_msg},
-                        ))
-
             except Exception as e:
                 last_error = self._classify_error(e)
                 if attempt < task.max_retries and last_error.level == ErrorLevel.L1_TEMPORARY:
-                    await event_bus.publish(AgentEvent(
-                        event_type=EventType.TASK_RETRYING,
-                        agent_name=self.agent_name,
-                        task_id=task.task_id,
-                        data={"attempt": attempt, "error": str(e)},
-                    ))
+                    await self._publish_event(
+                        EventType.TASK_RETRYING, task,
+                        {"attempt": attempt, "error": str(e)},
+                    )
                     continue
-                else:
-                    break
+                break
+        raise RuntimeError(last_error.message if last_error else "Unknown error")
 
-        await event_bus.publish(AgentEvent(
-            event_type=EventType.TASK_FAILED,
-            agent_name=self.agent_name,
-            task_id=task.task_id,
-            data={
-                "error": last_error.model_dump() if last_error else None,
+    async def _on_validation_success(
+        self, task: TaskContext, checkpoint: Any, output: OutputSchema, attempt: int
+    ) -> OutputSchema:
+        """Finalize a validated output: stamp metadata, publish TASK_COMPLETED, delete checkpoint."""
+        from agent_system.core.failure_ux import CheckpointStore
+        output.metadata["retry_count"] = attempt
+        output.metadata["agent_name"] = self.agent_name
+        task.completed_at = datetime.now(timezone.utc)
+        if hasattr(self, "_last_usage") and self._last_usage:
+            output.metadata["llm_usage"] = self._last_usage.model_dump()
+        await self._publish_event(
+            EventType.TASK_COMPLETED, task,
+            {"output_id": output.id, "type": output.type},
+        )
+        checkpoint.complete_step("do_work", output.model_dump(mode="json"))
+        CheckpointStore().delete(task.task_id)
+        return output
+
+    # ── Step 3: Final failure ─────────────────────────────────────
+
+    async def _handle_final_failure(
+        self, task: TaskContext, checkpoint: Any, last_error: AgentError
+    ) -> None:
+        """Publish TASK_FAILED and persist the failed checkpoint (kept for debugging)."""
+        from agent_system.core.failure_ux import CheckpointStore
+        await self._publish_event(
+            EventType.TASK_FAILED, task,
+            {
+                "error": last_error.model_dump(),
                 "attempts": task.retry_count,
             },
-        ))
+        )
+        checkpoint.fail_step("do_work", last_error.message)
+        CheckpointStore().save(checkpoint)
 
-        # Save checkpoint as failed (keeps resume context for debugging)
-        if last_error:
-            cp.fail_step("do_work", last_error.message)
-            _checkpoint_store.save(cp)
+    # ── Step 4: 4-way escalation ─────────────────────────────────
 
-        # ---- 4-way escalation (Iteration 4) ----
-        if hasattr(self, '_resolver') and self._resolver:
-            from agent_system.core.evaluator import evaluator as default_evaluator
-            analysis = default_evaluator.evaluate(
-                error_message=last_error.message if last_error else "Unknown error",
-                agent_name=self.agent_name,
-                agent_capabilities=self.agent_capabilities,
-                attempted_action=task.metadata.get("action"),
-                task_input=task.input,
-                retry_count=task.retry_count,
-            )
-            resolution = await self._resolver.resolve(task, RuntimeError(last_error.message if last_error else "Unknown"), analysis)
-            if resolution.status.value == "success" and resolution.output:
-                _checkpoint_store.delete(task.task_id)
-                return resolution.output
+    async def _escalate(self, task: TaskContext, last_error: AgentError) -> OutputSchema:
+        """
+        Run the 4-way resolver. Returns OutputSchema if a path resolves; raises otherwise.
+        The ESCALATE path additionally invokes the CEO Agent for a decision (best-effort).
+        """
+        from agent_system.core.evaluator import evaluator as default_evaluator
+        from agent_system.core.failure_ux import CheckpointStore
 
-            # ESCALATE path: actually invoke the CEO Agent for a decision
-            if resolution.path.value == "escalate":
-                try:
-                    from agent_system.agents.ceo_agent import CEOAgent
-                    from agent_system.core.agent import TaskContext
-                    ceo = CEOAgent()
-                    escalate_task = TaskContext(
-                        task_id=f"{task.task_id}-esc",
-                        input=f"Escalation from {self.agent_name}: {last_error.message}",
-                        metadata={
-                            "is_escalation": True,
-                            "escalation_data": {
-                                "task_id": task.task_id,
-                                "agent": self.agent_name,
-                                "severity": analysis.severity.value,
-                                "error": last_error.message,
-                                "analysis": analysis.reasoning,
-                                "capabilities": self.agent_capabilities,
-                                "similar_experiences": analysis.similar_experiences,
-                            },
-                        },
-                        max_retries=1,
-                    )
-                    ceo_output = await ceo.execute(escalate_task)
-                    task.metadata["ceo_decision"] = ceo_output.payload
-                    logger.info(f"CEO made a decision: {ceo_output.payload.get('decision', {}).get('action')}")
-                except Exception as e:
-                    logger.warning(f"CEO escalation failed: {e}")
-
+        analysis = default_evaluator.evaluate(
+            error_message=last_error.message,
+            agent_name=self.agent_name,
+            agent_capabilities=self.agent_capabilities,
+            attempted_action=task.metadata.get("action"),
+            task_input=task.input,
+            retry_count=task.retry_count,
+        )
+        resolution = await self._resolver.resolve(
+            task, RuntimeError(last_error.message), analysis
+        )
+        if resolution.status.value == "success" and resolution.output:
+            CheckpointStore().delete(task.task_id)
+            return resolution.output
+        if resolution.path.value == "escalate":
+            await self._invoke_ceo(task, last_error, analysis)
         raise RuntimeError(
-            f"[{last_error.level.value}] {self.agent_name} failed: "
-            f"{last_error.message if last_error else 'Unknown error'}"
+            f"[{last_error.level.value}] {self.agent_name} failed: {last_error.message}"
         )
 
+    async def _invoke_ceo(self, task: TaskContext, last_error: AgentError, analysis: Any) -> None:
+        """Best-effort: spawn a CEO Agent and let it make a decision on this failure."""
+        try:
+            from agent_system.agents.ceo_agent import CEOAgent
+            ceo = CEOAgent()
+            escalate_task = TaskContext(
+                task_id=f"{task.task_id}-esc",
+                input=f"Escalation from {self.agent_name}: {last_error.message}",
+                metadata={
+                    "is_escalation": True,
+                    "escalation_data": {
+                        "task_id": task.task_id,
+                        "agent": self.agent_name,
+                        "severity": analysis.severity.value,
+                        "error": last_error.message,
+                        "analysis": analysis.reasoning,
+                        "capabilities": self.agent_capabilities,
+                        "similar_experiences": analysis.similar_experiences,
+                    },
+                },
+                max_retries=1,
+            )
+            ceo_output = await ceo.execute(escalate_task)
+            task.metadata["ceo_decision"] = ceo_output.payload
+            logger.info(
+                f"CEO made a decision: {ceo_output.payload.get('decision', {}).get('action')}"
+            )
+        except Exception as e:
+            logger.warning(f"CEO escalation failed: {e}")
+
+    # ── Helpers ──────────────────────────────────────────────────
+
+    async def _publish_event(self, event_type: EventType, task: TaskContext, data: Dict[str, Any]) -> None:
+        """Thin wrapper around event_bus.publish for type-safe events."""
+        await event_bus.publish(AgentEvent(
+            event_type=event_type,
+            agent_name=self.agent_name,
+            task_id=task.task_id,
+            data=data,
+        ))
+
     def _classify_error(self, e: Exception) -> AgentError:
+        """Map an exception to an AgentError level (L1-L4) by keyword match."""
         error_str = str(e).lower()
         tb = traceback.format_exc()
-
         if any(kw in error_str for kw in ["timeout", "rate limit", "429", "503", "connection"]):
             return AgentError(level=ErrorLevel.L1_TEMPORARY, message=str(e), exception=tb)
         if any(kw in error_str for kw in ["permission denied", "access denied"]):
