@@ -52,3 +52,81 @@ include = ["agent_system*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+# ---------------------------------------------------------------------------
+# Static analysis: ruff + mypy
+# Currently advisory: CI runs both but exit code ignored (|| true). Future
+# commits can tighten by removing the `|| true` from CI step or moving
+# rules to fail-on-violation per-module via per-file-ignores overrides.
+# See .github/workflows/ci.yml step "Lint + type-check (advisory)".
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src"]
+extend-exclude = [
+    "tests/fixtures",
+    "web/node_modules",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+# Safe rule families only. Each prefix is opt-in.
+#   E/F  pycodestyle errors + pyflakes  (must-fix correctness)
+#   W    pycodestyle warnings
+#   I    isort (import order)
+#   UP   pyupgrade (modernize syntax)
+#   B    flake8-bugbear (likely bugs)
+#   C4   flake8-comprehensions
+#   SIM  flake8-simplify
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = [
+    # Allow unused imports in __init__.py modules (re-exports)
+    "F401",
+    # Allow print statements (logging migration is in-progress, not a blocker)
+    "T201",
+    # Allow `assert` in tests
+    "B011",
+    # Allow star imports (intentional in some plugin modules)
+    "F403", "F405",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: allow magic numbers, missing docstrings, longer lines
+"tests/**/*.py" = ["E501", "B008", "B904"]
+# __init__.py: allow unused (re-export)
+"**/__init__.py" = ["F401", "F403"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.mypy]
+# Advisory. Future tightening: move to strict=True per-module via overrides.
+python_version = "3.11"
+mypy_path = "src"
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_any_explicit = false
+disallow_any_generics = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+no_implicit_optional = true
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_missing_imports = true
+disallow_untyped_defs = false
+
+# Module-specific overrides — silence known-noisy third-party libs
+[[tool.mypy.overrides]]
+module = ["autogen_agentchat.*", "autogen_ext.*", "langchain.*", "langgraph.*"]
+ignore_missing_imports = true

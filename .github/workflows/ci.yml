@@ -55,6 +55,24 @@ jobs:
           pytest tests/test_production_readiness.py -v
         continue-on-error: false
 
+      - name: Lint + type-check (advisory)
+        # ADVISORY ONLY: violations are printed but never fail the job.
+        # Goal: surface the current state of the codebase against ruff + mypy
+        # configured in pyproject.toml, so we can progressively tighten
+        # rules in follow-up commits instead of fixing 1k+ warnings in one go.
+        # Future commits can:
+        #   1. Promote per-rule to fail-on (remove `|| true`)
+        #   2. Move to per-file ignores for noisy modules
+        #   3. Tighten mypy from `disallow_untyped_defs = False` to `True`
+        env:
+          PYTHONPATH: src
+        run: |
+          echo "=== ruff (advisory) ==="
+          ruff check src/ tests/ || true
+          echo "=== mypy (advisory) ==="
+          mypy src/ || true
+        continue-on-error: true
+
   real-llm-smoke:
     name: Real-LLM smoke (manual / weekly)
     runs-on: ubuntu-latest
