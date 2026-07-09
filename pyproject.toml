@@ -5,10 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-system"
 version = "0.1.0"
-description = "Enterprise Multi-Agent Collaboration Platform"
+description = "Enterprise Multi-Agent Orchestration Platform"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
+# NOTE: This list must include EVERYTHING src/ imports (transitive or not)
+# because CI does `pip install -e .[api,storage,dev]` from a clean venv.
+# Anything missing here breaks the CI unit-tests job with ModuleNotFoundError.
 dependencies = [
     "langgraph>=0.4.0",
     "langchain-anthropic>=0.3.0",
@@ -16,12 +19,22 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "anthropic>=0.49.0",
+    "pyjwt>=2.8.0",
+    "python-dotenv>=1.0.0",
     "pyyaml>=6.0",
     "rich>=13.0",
     "typer>=0.12.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.30.0",
     "websockets>=13.0",
+    "httpx>=0.27.0",
+    "sqlalchemy>=2.0",
+    "redis>=5.0",
+    "psycopg2-binary>=2.9",
+    "opentelemetry-api>=1.40.0",
+    "opentelemetry-sdk>=1.40.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.40.0",
+    "openapi-python-client>=0.26.0",
 ]
 
 [project.optional-dependencies]
@@ -31,8 +44,6 @@ dev = [
     "pytest-cov>=5.0",
 ]
 autogen = ["autogen-agentchat>=0.4.0", "autogen-ext[openai]>=0.4.0"]
-api = ["fastapi>=0.115.0", "uvicorn>=0.30.0", "websockets>=13.0"]
-storage = ["sqlalchemy>=2.0", "redis>=5.0", "psycopg2-binary>=2.9"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
