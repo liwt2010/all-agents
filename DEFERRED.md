@@ -90,3 +90,50 @@ gh run view 29014816599 --log
 3. 如果过了，**改写本节**: 把 "STATUS UPDATE" 改名为 "RESOLVED 2026-07-09T...:Z"，跑通结果写入
 4. **不要删本节**: root cause 是用户亲手挖出来的，留作记录
 
+---
+
+## SESSION END — 2026-07-09 20:45
+
+### 本次 session 末态（git truth, all on origin/main）
+
+```
+HEAD                 = 547e7f3  docs+ops(v0.1.0): PR_BODY.md + scripts/ + web/
+origin/main          = 547e7f3  (in sync with local)
+local  v0.1.0 tag    = 83a4922  (reverted from brief forward to 547e7f3)
+remote v0.1.0 tag    = 83a4922  (force-pushed after revert)
+release page         = id=351495762, body intact (still says "v0.1.0 | commit 83a4922")
+Docker image         = liwt2010/all-agents:v0.1.0 (image tag still pre-CI-fix)
+                  = d9d25548b946 (rebuilt session, tagged but NOT pushed to Docker Hub)
+CI Run #22           = status unknown (was queued 9min when we stopped polling)
+```
+
+### Post-snapshot commits on main (NOT in v0.1.0 tag)
+
+| Commit | What it does |
+|---|---|
+| `e90f49f` | fix(ci): requirements.txt cleanup (PowerShell stderr leak + pyautogen + build pins). Bug analysis verbatim from user. |
+| `ee44ccf` | docs(deferred): this STATUS UPDATE before another session. |
+| `547e7f3` | docs+ops: .github/PR_BODY.md, CLAUDE.md, scripts/{gen_auth_secret.py,start_server.sh}, web/{Dockerfile,nginx.conf}. projects/lip-reading-android/ deliberately not included. |
+
+These three commits form a natural "v0.1.1 next release" bundle — they fix CI, document the deferred state, and add web container glue.
+
+### Things user still owes / can do later
+
+1. **Run `docker login -u liwt2010`** to push the rebuilt `liwt2010/all-agents:v0.1.0` to Docker Hub (image `d9d25548b946` is local; tag was set but push not executed — credentials were invalid last attempt).
+2. **Revoke PAT `mavis-release-edit`** at https://github.com/settings/tokens (used for creating release 351495762 + uploading Docker tar.gz + asset ping.txt delete).
+3. **Refresh `/api/health` smoke test** on any image change.
+4. **Decide v0.1.1 tag**: if e90f49f + ee44ccf + 547e7f3 look good, tag forward to a new e.g. `v0.1.1` (NOT silently bundled into v0.1.0 — user decision was explicit: keep v0.1.0 anchored to 83a4922).
+
+### Cron state
+
+- `ci-after-e90f49f` cron **DELETED** at 20:37. No active crons.
+- User said "明天或晚点继续" — they'll come back on their own; no remote cron needed.
+
+### Memory written this session
+
+- `PowerShell pip freeze > file leaks stderr into requirements.txt` (agent memory)
+
+### One sentence for next session to start from
+
+> Root cause of GitHub Actions `Install dependencies` 4s fast-fail was PowerShell stderr leakage into the bottom of `requirements.txt` — fixed in `e90f49f` (surgical regex strip + remove `pyautogen`/`pip`/`pip-tools`/`setuptools`/`wheel`). Local dry-run pass. CI Run #22 e90f49f was queued 9min+ when polling stopped. v0.1.0 tag intentionally anchored at 83a4922, not silently forward-moved. Post-snapshot work lives at HEAD `547e7f3` and is ready for v0.1.1 unless told otherwise.
+
