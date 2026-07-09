@@ -31,6 +31,11 @@ node_modules/
 web/dist/
 web/.vite/
 
+# Claude / IDE agent local config (machine-specific, not repo content)
+.claude/
+.aider*
+.cursor/
+
 # OS
 .DS_Store
 Thumbs.db

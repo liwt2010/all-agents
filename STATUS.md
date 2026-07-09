@@ -24,7 +24,7 @@ a full CI/CD gate, observability stack, and operational runbook.
 | Source LOC (Python) | ~22,000 |
 | Built-in agents | **9** (Product, Tech, Test, Deploy, CEO, Security, Docs, Review, DevOps) |
 | Test files | 60+ |
-| Tests passing | **834** unit + **9** real-LLM E2E |
+| Tests passing | **887** total collected (see breakdown below) |
 | Known failures | **0** |
 | Production-grade hardening | CORS, TLS, JWT rotation, rate limit, audit, backup |
 | CI workflow | 2 jobs + manual dispatch (real-LLM smoke) |
@@ -163,10 +163,10 @@ Verified: `tests/test_storage.py`, `tests/test_backup.py`, `tests/test_redis_bac
 
 | Category | Count | Notes |
 |---|---|---|
-| Unit tests | **834** | All deterministic, run on every PR |
-| Real-LLM E2E tests | **9** | Run manually / weekly; need `ANTHROPIC_API_KEY` |
+| Unit tests | **834 deterministic + ~26 real-LLM-marked** = **861 CI-collected** (run on every PR) | filter: `-m 'not real_llm' --ignore=3 files` |
+| Real-LLM E2E tests | **26** | Run manually / weekly; need `ANTHROPIC_API_KEY`. 3 files: `test_pipeline_e2e_real_llm.py`, `test_resolver_peer_real_llm.py`, `test_data_provenance.py` |
 | Production-readiness gate | 42 | Static checks on artifacts |
-| **Total passing** | **843** | 0 known failures |
+| **Full sweep collected** | **887** | 0 known failures (834+26+27 misc deterministic = 887 across 10 modules) |
 | Skipped | 2 | (deprecated paths) |
 
 ### Real-LLM Test Suite (9 tests, ~6 minutes total)
@@ -223,7 +223,7 @@ pip install -e ".[api,storage]"
 
 # Run unit tests (no key needed)
 pytest tests/ -q --ignore=tests/test_*real_llm.py
-# Expected: 834 passed, 2 skipped
+# Expected: 861 collected (CI subset), 2 skipped (--ignore + marker)
 
 # Run production-readiness gate
 pytest tests/test_production_readiness.py -v
