@@ -19,7 +19,10 @@ from typing import Any, Callable, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_system.config.settings import get_settings
-from agent_system.core.schema import OutputSchema, ValidationResult, validator
+from agent_system.core.schema import (
+    OutputSchema, ValidationResult, validator,
+    FailureNodeLogger,
+)
 from agent_system.tools.base import ToolRegistry, discover_tools, filter_registry
 from agent_system.core.llm_router import LLMRouter, router as default_router
 
@@ -218,14 +221,28 @@ Begin."""
             task.retry_count = attempt
             try:
                 output = await self.do_work(task)
-                v_result = validator.validate(output)
+                # PR-2.2: tiered validation with auto-repair + FAILURE node log
+                output, v_result = validator.validate_and_repair(
+                    output, agent_name=self.agent_name,
+                )
+                # Log every validation outcome to the graph for audit
+                FailureNodeLogger.record_validation(
+                    task_id=task.task_id,
+                    agent_name=self.agent_name,
+                    output=output,
+                    result=v_result,
+                )
                 if v_result.valid:
                     return await self._on_validation_success(task, checkpoint, output, attempt)
-                # Validation failed — record + decide whether to retry
+                # Validation failed (tier-1 errors survived) — record + retry
                 last_error = AgentError(
                     level=ErrorLevel.L2_RECOVERABLE,
                     message=f"Output validation failed: {', '.join(v_result.errors)}",
-                    details={"warnings": v_result.warnings},
+                    details={
+                        "warnings": v_result.warnings,
+                        "repairs": v_result.repairs,
+                        "partial": output.partial,
+                    },
                 )
                 if attempt < task.max_retries:
                     await self._publish_event(
