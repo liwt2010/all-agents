@@ -265,11 +265,40 @@ Begin."""
     ) -> OutputSchema:
         """Finalize a validated output: stamp metadata, publish TASK_COMPLETED, delete checkpoint."""
         from agent_system.core.failure_ux import CheckpointStore
+        from agent_system.core.observability import (
+            build_provenance,
+            attach_provenance,
+            ProvenanceSource,
+        )
         output.metadata["retry_count"] = attempt
         output.metadata["agent_name"] = self.agent_name
         task.completed_at = datetime.now(timezone.utc)
         if hasattr(self, "_last_usage") and self._last_usage:
             output.metadata["llm_usage"] = self._last_usage.model_dump()
+
+        # P2-3.2: stamp data provenance so consumers/UI know what they're
+        # looking at. Real LLM = source=real_llm, mock = source=mock,
+        # LLM-failed-then-fallback = source=llm_failure.
+        usage = getattr(self, "_last_usage", None)
+        if usage is not None and getattr(usage, "mock", False):
+            source = ProvenanceSource.MOCK
+        elif usage is not None:
+            source = ProvenanceSource.REAL_LLM
+        else:
+            # No usage recorded (e.g. agent bypassed LLM entirely)
+            source = ProvenanceSource.UNKNOWN
+        # If the output is marked partial (raw_output fallback), override
+        # to LLM_FAILURE so the badge shows the LLM attempted but failed.
+        if getattr(output, "partial", False):
+            source = ProvenanceSource.LLM_FAILURE
+        prov = build_provenance(
+            source=source,
+            agent_name=self.agent_name,
+            task_id=task.task_id,
+            usage=usage,
+        )
+        attach_provenance(output, prov)
+
         await self._publish_event(
             EventType.TASK_COMPLETED, task,
             {"output_id": output.id, "type": output.type},

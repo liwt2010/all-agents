@@ -330,3 +330,165 @@ class SimpleTracer:
 # Global instances
 metrics_calculator = MetricsCalculator()
 tracer = SimpleTracer()
+
+
+# ── P2-3.2 Data Provenance ────────────────────────────────────────────
+#
+# Every agent output must declare where its data came from. This is the
+# user's hard requirement ("数据准确性是基础"): no silent degradation to
+# mock data, no unmarked LLM failures, no unmarked real-LLM outputs.
+#
+# Three flavors:
+#   1. real_llm      — output produced by a real LLM API call
+#   2. mock          — output produced by deterministic mock (no LLM call)
+#   3. llm_failure   — LLM call attempted but failed; output is fallback
+#                      (e.g. raw_output from JSON parse failure)
+#
+# Frontend / dashboards MUST show the provenance badge prominently so
+# users know what they're looking at.
+
+from enum import Enum
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+
+
+class ProvenanceSource(str, Enum):
+    REAL_LLM = "real_llm"
+    MOCK = "mock"
+    LLM_FAILURE = "llm_failure"
+    UNKNOWN = "unknown"
+
+
+class DataProvenance(BaseModel):
+    """Provenance metadata for an agent output.
+
+    Attached to OutputSchema.metadata["data_provenance"] after every
+    successful agent call. Surfaces the data source to downstream
+    consumers and UI.
+
+    Required fields:
+        source: how the data was produced
+        timestamp: when the data was produced (ISO 8601 UTC)
+    Recommended fields:
+        model: the LLM model name (for real_llm and llm_failure)
+        provider: "openai" / "anthropic" / "mock" / etc.
+        confidence: 0.0-1.0 self-reported confidence (LLM does not
+                     provide this; we use 0.85 for real LLM, 0.0 for mock)
+        agent_name: which agent produced the output
+        task_id: which task produced the output
+        duration_ms: how long the LLM call took (for real_llm)
+        tokens: input/output token counts (for real_llm)
+        cost_usd: estimated cost (for real_llm)
+    """
+    source: ProvenanceSource
+    timestamp: str  # ISO 8601 UTC
+    model: str = ""
+    provider: str = ""
+    confidence: float = 0.0
+    agent_name: str = ""
+    task_id: str = ""
+    duration_ms: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    error: str = ""  # populated on llm_failure
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.model_dump(mode="json")
+
+    def is_real(self) -> bool:
+        return self.source == ProvenanceSource.REAL_LLM
+
+    def is_mock(self) -> bool:
+        return self.source == ProvenanceSource.MOCK
+
+    def badge(self) -> str:
+        """Human-readable badge for UI display.
+
+        Real LLM: "🤖 Claude · 12.3s · $0.014"
+        Mock:     "⚠️ MOCK DATA — NOT REAL LLM OUTPUT"
+        Failure:  "❌ LLM FAILED — fallback content"
+        """
+        if self.is_real():
+            model_short = self.model.split("/")[-1] if self.model else "LLM"
+            return (
+                f"🤖 {model_short} · "
+                f"{self.duration_ms/1000:.1f}s · "
+                f"${self.cost_usd:.4f}"
+            )
+        if self.is_mock():
+            return "⚠️ MOCK DATA — NOT REAL LLM OUTPUT"
+        if self.source == ProvenanceSource.LLM_FAILURE:
+            err_short = self.error[:60] if self.error else "unknown"
+            return f"❌ LLM FAILED — {err_short}"
+        return f"? {self.source.value}"
+
+
+def build_provenance(
+    source: ProvenanceSource,
+    agent_name: str = "",
+    task_id: str = "",
+    usage: Optional[Any] = None,  # LLMUsage, but keep loose to avoid cycle
+    error: str = "",
+) -> DataProvenance:
+    """Build a DataProvenance from current call context.
+
+    Args:
+        source: REAL_LLM / MOCK / LLM_FAILURE
+        agent_name: which agent is calling
+        task_id: which task is running
+        usage: an LLMUsage instance (optional). Populates model/provider/
+               tokens/cost/duration when source is REAL_LLM or LLM_FAILURE.
+        error: error string for LLM_FAILURE source
+    """
+    prov = DataProvenance(
+        source=source,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        agent_name=agent_name,
+        task_id=task_id,
+        error=error,
+    )
+    if source == ProvenanceSource.REAL_LLM:
+        prov.confidence = 0.85  # default for real LLM (model does not provide)
+    elif source == ProvenanceSource.MOCK:
+        prov.confidence = 0.0  # mock data is not authoritative
+    elif source == ProvenanceSource.LLM_FAILURE:
+        prov.confidence = 0.0  # failure means data is untrustworthy
+    # else UNKNOWN: leave 0.0
+
+    if usage is not None:
+        try:
+            prov.model = getattr(usage, "model", "") or ""
+            prov.duration_ms = float(getattr(usage, "duration_ms", 0.0) or 0.0)
+            prov.input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+            prov.output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+            prov.cost_usd = float(getattr(usage, "cost_estimate", 0.0) or 0.0)
+            # provider from a heuristic: if model starts with claude it's anthropic,
+            # if gpt/o1/o3/o4 it's openai, otherwise check env LLM_PROVIDER
+            from agent_system.core.llm_router import router as _default_router
+            prov.provider = _default_router.llm_provider
+        except Exception:
+            pass
+    return prov
+
+
+def attach_provenance(
+    output,  # OutputSchema (loose to avoid cycle)
+    provenance: DataProvenance,
+) -> None:
+    """Attach provenance to an output's metadata. Mutates output."""
+    output.metadata["data_provenance"] = provenance.to_dict()
+    output.metadata["data_provenance_badge"] = provenance.badge()
+
+
+def get_provenance(output) -> Optional[DataProvenance]:
+    """Read back the provenance from an output's metadata, if present."""
+    raw = output.metadata.get("data_provenance")
+    if not raw:
+        return None
+    if isinstance(raw, DataProvenance):
+        return raw
+    try:
+        return DataProvenance.model_validate(raw)
+    except Exception:
+        return None
