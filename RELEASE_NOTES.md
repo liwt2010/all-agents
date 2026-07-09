@@ -2,12 +2,12 @@
 
 **Release date:** 2026-07-09
 **Git tag:** `v0.1.0`
-**Commit:** `f5912ba` (and 21 prior commits on `main`)
+**Commit:** `83a4922` (and 21 prior commits on `main`)
 
 This is the **first production-grade release** of the Agent System
 multi-agent orchestration platform. All 22 PRs planned for v0.1.0 are
-delivered, with **362 unit tests + 5 real-LLM E2E tests passing** and
-**zero known production regressions**.
+delivered, with **834 unit tests + 9 real-LLM E2E tests + 42 production-readiness gate (885 total) passing**
+and **zero known production regressions**.
 
 ---
 
@@ -100,7 +100,7 @@ delivered, with **362 unit tests + 5 real-LLM E2E tests passing** and
 | CI/CD gate | ✅ |
 | 4-way resolver (SELF/PEER/HUMAN/ESCALATE) | ✅ |
 | Experience feedback loop | ✅ |
-| **Test coverage** | **362 unit + 5 real-LLM** |
+| **Test coverage** | **834 unit + 9 real-LLM + 42 production-readiness gate = 885 total** |
 
 ---
 
@@ -131,13 +131,13 @@ For future v0.1.x → v0.1.y upgrades, see `RUNBOOK.md` §"Upgrade procedure".
 ## Verification
 
 ```bash
-# Tag points to commit f5912ba
+# Tag points to commit 83a4922
 git checkout v0.1.0
 
 # Install
 pip install -r requirements.txt
 
-# Run tests (requires LLM API key for the 5 real-LLM tests)
+# Run tests (requires LLM API key for the 9 real-LLM tests)
 ANTHROPIC_API_KEY=...  pytest tests/ -q
 
 # Production-readiness gate (always runs in CI)
@@ -147,8 +147,9 @@ pytest tests/test_production_readiness.py -v
 make codegen
 ```
 
-Expected: **362 passed, 2 warnings** in ~33s.
-Real-LLM tests: **5 passed** in ~125s (network-bound).
+Expected: **834 passed** in unit test run.
+Production-readiness gate: **42 passed**.
+Real-LLM tests: **9 passed** in ~6min (network-bound).
 
 ---
 
