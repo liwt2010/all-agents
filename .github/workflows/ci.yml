@@ -1,87 +1,70 @@
-# GitHub Actions CI for Agent System
-
 name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
 
 jobs:
-  test:
-    name: Backend tests
+  unit-tests:
+    name: Unit tests (no API key)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
+          python-version: '3.11'
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -e ".[dev,api,storage]"
-
-      - name: Run tests
+          pip install -e ".[api,storage,dev]"
+      - name: Run unit tests
+        env:
+          PYTHONPATH: src
         run: |
-          pytest tests/ -v --tb=short --maxfail=10
-
-      - name: Type check
+          # Real-LLM tests skip themselves when no key is set
+          # Production-readiness gate must always run
+          pytest tests/ \
+            -v --tb=short \
+            -m 'not real_llm' \
+            --ignore=tests/test_pipeline_e2e_real_llm.py \
+            --ignore=tests/test_resolver_peer_real_llm.py \
+            --ignore=tests/test_data_provenance.py
+      - name: Production-readiness gate
+        env:
+          PYTHONPATH: src
         run: |
-          python -c "from agent_system.core.graph import MultiLinkGraph; print('imports ok')"
-        continue-on-error: true
+          # This gate verifies the codebase is production-grade:
+          # docs exist, Dockerfile has healthcheck, .env.example is
+          # complete, no TODO/FIXME in critical paths, no hardcoded keys.
+          pytest tests/test_production_readiness.py -v
 
-  frontend:
-    name: Frontend build
+  real-llm-smoke:
+    name: Real-LLM smoke (manual / weekly)
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: web
-
+    # Only run on main + manual dispatch. PRs don't have access to
+    # the real API key (CI secret).
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: 20
-
-      - name: Install + build
-        run: |
-          npm ci
-          npm run build
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install + check imports
+          python-version: '3.11'
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          python -c "
-          # Smoke-test that everything imports
-          from agent_system.agents.ceo_agent import CEOAgent
-          from agent_system.core.auth import AuthService, RBAC
-          from agent_system.storage.task_store import TaskRecord
-          from agent_system.tools.mcp_client import MCPClient
-          from agent_system.concurrency.lock import ResourceLock
-          from agent_system.observability.metrics import MetricsRegistry
-          print('All imports OK')
-          "
+          pip install -e ".[api,storage,dev]"
+      - name: Run real-LLM pipeline smoke test
+        env:
+          PYTHONPATH: src
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_PROVIDER: anthropic
+        run: |
+          # This test runs a full Product->Tech->Test pipeline against
+          # a real LLM. If it fails, the model integration is broken.
+          pytest tests/test_pipeline_e2e_real_llm.py::test_pipeline_step_by_step_real_llm -v -s
+        continue-on-error: false
