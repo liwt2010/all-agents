@@ -323,3 +323,112 @@ class TestRequireRealKey:
         router = LLMRouter()
         # Should not raise
         router.require_real_key()
+
+
+class TestNoneUsageDefense:
+    """Regression tests for None-valued usage fields from non-standard proxies.
+
+    Some OpenAI/Anthropic-compatible proxies return usage objects where
+    input_tokens/output_tokens are present but set to None (e.g. when the
+    upstream uses different field names like prompt_tokens/completion_tokens
+    that the SDK doesn't auto-translate). The router must coerce these to 0
+    so estimate_cost() doesn't fail with `None / int`.
+    """
+
+    def test_anthropic_usage_extraction_coerces_none(self):
+        """Direct test of the None-coercion logic for anthropic usage fields.
+
+        Mirrors the production extraction code path in _call_anthropic.
+        """
+        class FakeUsage:
+            input_tokens = None
+            output_tokens = None
+            cache_read_input_tokens = None
+            cache_creation_input_tokens = None
+
+        usage = FakeUsage()
+        # Same coercion as in _call_anthropic
+        input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+        cache_read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+        cache_write = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+        assert input_tokens == 0
+        assert output_tokens == 0
+        assert cache_read == 0
+        assert cache_write == 0
+
+    def test_openai_usage_extraction_coerces_none(self):
+        """Direct test of the None-coercion logic for openai usage fields.
+
+        Mirrors the production extraction code path in _call_openai.
+        """
+        class FakeUsage:
+            prompt_tokens = None
+            completion_tokens = None
+
+        usage = FakeUsage()
+        # Same coercion as in _call_openai
+        input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
+        output_tokens = int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0
+        assert input_tokens == 0
+        assert output_tokens == 0
+
+    @pytest.mark.asyncio
+    async def test_call_with_retry_handles_none_usage(self, monkeypatch):
+        """End-to-end: call_llm must not crash when usage fields are None.
+
+        Patches the SDK client's create method to return a response with
+        None-valued usage fields. The router must coerce them to 0 and
+        return a valid LLMUsage, not raise TypeError.
+        """
+        from agent_system.core.llm_router import LLMRouter, LLMConfig
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-fake-key")
+
+        class FakeUsage:
+            input_tokens = None
+            output_tokens = None
+            cache_read_input_tokens = None
+            cache_creation_input_tokens = None
+
+        class FakeBlock:
+            type = "text"
+            text = "hello"
+
+        class FakeResponse:
+            model = "claude-test"
+            content = [FakeBlock()]
+            usage = FakeUsage()
+
+        class FakeMessages:
+            create = AsyncMock(return_value=FakeResponse())
+
+        class FakeClient:
+            messages = FakeMessages()
+
+        router = LLMRouter()
+        monkeypatch.setattr(router, "get_api_client", lambda: FakeClient())
+
+        config = LLMConfig(model="claude-test", max_tokens=100, temperature=0.5)
+        text, usage, raw = await router._call_with_retry(
+            client=FakeClient(),
+            config=config,
+            system_prompt="You are helpful.",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+        )
+        assert text == "hello"
+        assert usage.input_tokens == 0
+        assert usage.output_tokens == 0
+        assert usage.cost_estimate == 0.0  # estimate_cost with 0,0 = 0.0
+
+    def test_estimate_cost_with_none_raises(self):
+        """Sanity: estimate_cost() itself does NOT defend against None.
+
+        Callers (in _call_anthropic / _call_openai) are responsible for
+        coercion. If you call estimate_cost with None directly, you still
+        get TypeError — which is the correct behavior at the function
+        boundary.
+        """
+        from agent_system.core.llm_router import estimate_cost
+        with pytest.raises(TypeError):
+            estimate_cost("test-model", None, 100)

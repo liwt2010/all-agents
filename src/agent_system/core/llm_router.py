@@ -462,11 +462,15 @@ class LLMRouter:
         text = "".join(text_parts)
 
         # Usage
+        # NOTE: getattr default doesn't catch None — the proxy may return usage
+        # with input_tokens=None when the upstream uses OpenAI-style fields
+        # (prompt_tokens / completion_tokens) that the Anthropic SDK doesn't
+        # auto-translate. Coerce to int to avoid None / int in estimate_cost.
         usage = response.usage
-        input_tokens = getattr(usage, "input_tokens", 0)
-        output_tokens = getattr(usage, "output_tokens", 0)
-        cache_read = getattr(usage, "cache_read_input_tokens", 0)
-        cache_write = getattr(usage, "cache_creation_input_tokens", 0)
+        input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+        cache_read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+        cache_write = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
         cost = estimate_cost(response.model, input_tokens, output_tokens, cache_read, cache_write)
 
         usage_obj = LLMUsage(
@@ -551,9 +555,11 @@ class LLMRouter:
             text = msg.content or ""
 
             # Usage from OpenAI response
+            # Same None-defensive pattern: usage_info may exist but fields may be None
+            # when the proxy returns non-standard shapes.
             usage_info = response.usage
-            input_tokens = usage_info.prompt_tokens if usage_info else 0
-            output_tokens = usage_info.completion_tokens if usage_info else 0
+            input_tokens = int(getattr(usage_info, "prompt_tokens", 0) or 0) if usage_info else 0
+            output_tokens = int(getattr(usage_info, "completion_tokens", 0) or 0) if usage_info else 0
             cost = estimate_cost(config.model, input_tokens, output_tokens)
 
             usage_total.input_tokens += input_tokens
