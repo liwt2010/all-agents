@@ -306,6 +306,8 @@ class TestForbiddenPatterns:
         allowed_cli_files = {
             "src/agent_system/core/backup/restore.py",
             "src/agent_system/memory/storage/migrate.py",
+            "src/agent_system/codegen/openapi_spec.py",
+            "src/agent_system/codegen/sdk_generator.py",
         }
         for py_file in src_dir.rglob("*.py"):
             rel = str(py_file.relative_to(ROOT)).replace("\\", "/")

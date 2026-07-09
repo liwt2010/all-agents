@@ -1,0 +1,42 @@
+# Agent System — codegen Makefile
+#
+# Generates OpenAPI spec + Python SDK + (optional) TypeScript SDK.
+# All targets are idempotent.
+#
+# Usage:
+#   make codegen             # spec + python sdk (default)
+#   make codegen-ts          # also generate typescript sdk (needs Node.js)
+#   make spec                # just the OpenAPI spec
+#   make sdk-py              # just the Python SDK
+#   make sdk-ts              # just the TypeScript SDK
+#   make verify              # run the codegen tests
+
+.PHONY: codegen codegen-ts spec sdk-py sdk-ts verify help
+
+PYTHON ?= python
+PYTHONPATH_ARG := PYTHONPATH=src
+
+help:
+	@echo "Agent System — codegen targets:"
+	@echo "  make codegen   - Generate OpenAPI spec + Python SDK"
+	@echo "  make codegen-ts - Also generate TypeScript SDK (needs Node.js)"
+	@echo "  make spec      - Just the OpenAPI spec (openapi/openapi.{json,yaml})"
+	@echo "  make sdk-py    - Just the Python SDK (sdks/python/)"
+	@echo "  make sdk-ts    - Just the TypeScript SDK (sdks/typescript/)"
+	@echo "  make verify    - Run the codegen tests"
+
+codegen: spec sdk-py
+
+codegen-ts: codegen sdk-ts
+
+spec:
+	$(PYTHONPATH_ARG) $(PYTHON) -m agent_system.codegen.openapi_spec --output-dir ./openapi --print
+
+sdk-py: spec
+	$(PYTHONPATH_ARG) $(PYTHON) -m agent_system.codegen.sdk_generator --spec ./openapi/openapi.json --output-dir ./sdks/python
+
+sdk-ts: spec
+	$(PYTHONPATH_ARG) $(PYTHON) -m agent_system.codegen.ts_sdk_generator --spec ./openapi/openapi.json --output-dir ./sdks/typescript
+
+verify:
+	$(PYTHONPATH_ARG) $(PYTHON) -m pytest tests/test_openapi_sdk.py -v

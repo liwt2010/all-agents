@@ -39,3 +39,8 @@ Thumbs.db
 .coverage
 .coverage.*
 htmlcov/
+
+# Generated artifacts (regeneratable from source)
+openapi/openapi.json
+openapi/openapi.yaml
+sdks/

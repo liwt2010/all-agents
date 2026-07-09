@@ -98,7 +98,49 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Agent System API",
     version="0.1.0",
-    description="Enterprise Multi-Agent Platform",
+    description=(
+        "Enterprise Multi-Agent Platform — production-grade agent orchestration API.\n\n"
+        "## Features\n"
+        "- **Multi-agent orchestration**: Product, Tech, Test, Deploy, CEO agents\n"
+        "- **4-way resolution**: SELF / PEER / HUMAN / ESCALATE\n"
+        "- **Schema tolerance**: 4-tier validation (STRICT / LENIENT / REPAIR / WARN)\n"
+        "- **Data provenance**: Every output labeled REAL_LLM / MOCK / LLM_FAILURE\n"
+        "- **Experience feedback loop**: Failed tasks inform future attempts\n"
+        "- **Distributed tracing**: OpenTelemetry OTLP exporter (Jaeger / Tempo / SigNoz)\n"
+        "- **Prometheus metrics**: 11 metrics at /metrics\n"
+        "- **Audit log**: Queryable batch logger with retention\n"
+        "- **Rate limit**: Per-user / per-scope sliding window\n\n"
+        "## Auth\n"
+        "JWT bearer token in `Authorization: Bearer <token>` header. "
+        "See `/api/v1/auth/login` for the OAuth2 password flow.\n\n"
+        "## Idempotency\n"
+        "POST endpoints accept `Idempotency-Key` header to make retries safe.\n\n"
+        "## Rate limit\n"
+        "Default: 120 req/min/user, 20 req/min on /execute endpoints. "
+        "Returns `429` with `X-RateLimit-*` headers when exceeded."
+    ),
+    contact={
+        "name": "Agent System Team",
+        "url": "https://github.com/liwt2010/all-agents",
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+    servers=[
+        {"url": "https://api.agentsystem.example.com", "description": "Production"},
+        {"url": "https://staging-api.agentsystem.example.com", "description": "Staging"},
+        {"url": "http://localhost:8000", "description": "Local dev"},
+    ],
+    openapi_tags=[
+        {"name": "agents", "description": "Run individual agents (product, tech, test, deploy, ceo)"},
+        {"name": "pipeline", "description": "Multi-agent pipeline orchestration (product→tech→test→deploy)"},
+        {"name": "memory", "description": "Memory graph CRUD + experience query"},
+        {"name": "audit", "description": "Audit log query + export"},
+        {"name": "metrics", "description": "Prometheus metrics (scraped at /metrics)"},
+        {"name": "auth", "description": "JWT login / token refresh"},
+        {"name": "admin", "description": "Admin endpoints (backup, restore, settings)"},
+    ],
     lifespan=lifespan,
 )
 
