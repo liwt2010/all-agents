@@ -58,3 +58,35 @@ gh run view 29014816599 --log
 - READMEs (3 语言) + RELEASE_NOTES.md 已发布
 - CI 只是 "云端额外验证"，codebase 本来就 production-grade 的
 
+---
+
+## STATUS UPDATE — 2026-07-09 20:37 (root cause found, fix pushed, CI 还没跑)
+
+**过去 30 分钟进展（用户亲手给出根因分析）:**
+
+### 根因（已确认）
+1. **Bug 1 (fatal):** `requirements.txt` 末尾 8 行是 PowerShell stderr 泄漏进文件
+   - `python.exe :` / `所在位置 行:1 字符:` / `+ CategoryInfo` / `[notice] A new release of pip is available`
+   - 这些行被 pip 当包名解析 → `parse error` → 立即 abort（4 秒 fast-fail）
+   - 起源: 文件是用 PowerShell 跑 `python -m pip freeze > requirements.txt` 生成的，`2>&1` 在 PowerShell 主机下仍会混合 stderr
+
+2. **Bug 2:** `pyautogen==0.10.0` 与 `autogen-agentchat==0.7.5` namespace 冲突；pyproject 没声明 pyautogen，src 只 import 新 API
+3. **Bug 3:** `pip==24.0 / pip-tools / setuptools / wheel` 都是 build tool pins，运行时冗余
+
+### 已落地修复
+- ✅ Commit `e90f49f` pushed (`fix(ci): remove PowerShell stderr garbage + old auto API + build pins from requirements.txt`)
+- ✅ 文件精简: 91 包, 1702 bytes, 0 garbage
+- ✅ 本地 `pip install --dry-run -r requirements.txt` 全过
+- ✅ Memory 已记录 (PowerShell pip freeze stderr leak lesson)
+
+### 当前 CI 状态（截至 20:37）
+- Run #22 (e90f49f): `Queued` 状态 8 分钟，**未启动**
+- 看起来 GitHub 免费 runner 排不上队 / 资源紧张
+- 不再轮询（cron 已删，避免 spam）
+
+### 重启监控时
+1. 检查 https://github.com/liwt2010/all-agents/actions 看 Run #22 是否终于跑起来
+2. 如果仍 4 秒 fail，**用 PAT 调 API**（用户手动删过 PAT，需要重新粘或自己用 web 看 log）
+3. 如果过了，**改写本节**: 把 "STATUS UPDATE" 改名为 "RESOLVED 2026-07-09T...:Z"，跑通结果写入
+4. **不要删本节**: root cause 是用户亲手挖出来的，留作记录
+
