@@ -175,7 +175,29 @@ Begin."""
           - records task start/complete/failure to the experience graph
           - injects relevant past experiences into task.metadata['experiences']
             before _run_with_retry, so do_work() can use them as hints
+
+        When AGENT_OTEL_ENABLED=true, the entire execute() is wrapped in
+        an OTel span ("agent.execute") with attributes:
+          - agent.name, agent.capabilities, task.id, task.input_length
+        On success/error, the span gets the appropriate status. This
+        gives distributed tracing in Jaeger / Tempo / SigNoz for free.
         """
+        # ── OpenTelemetry distributed tracing (PR-14) ────────
+        from agent_system.observability.otel_exporter import get_otel_tracer
+        otel_tracer = get_otel_tracer("agent_system.core.agent")
+        with otel_tracer.start_as_current_span(
+            "agent.execute",
+            attributes={
+                "agent.name": self.agent_name,
+                "agent.capabilities": ",".join(self.agent_capabilities or []),
+                "task.id": getattr(task, "task_id", ""),
+                "task.input_length": len(getattr(task, "input", "") or ""),
+            },
+        ) as otel_span:
+            return await self._execute_inner(task, otel_span)
+
+    async def _execute_inner(self, task: TaskContext, otel_span) -> OutputSchema:
+        """Inner execute() — body of the OTel span wrapper."""
         # ── Memory hook (P2-3.1) ──────────────────────────────
         if self.memory_enabled:
             from agent_system.memory.experience import (
@@ -214,6 +236,13 @@ Begin."""
                         self.agent_name,
                         success=True,
                     )
+            # ── OTel: mark span OK + emit success attribute ──
+            try:
+                otel_span.set_attribute("agent.execute.status", "ok")
+                from opentelemetry.trace import Status, StatusCode
+                otel_span.set_status(Status(StatusCode.OK))
+            except Exception:
+                pass
             return output
         except Exception as e:
             if self.memory_enabled:
@@ -224,6 +253,15 @@ Begin."""
                     self.agent_name,
                     details={"attempts": getattr(task, "retry_count", 0)},
                 )
+            # ── OTel: mark span ERROR + record exception ─────
+            try:
+                otel_span.set_attribute("agent.execute.status", "error")
+                otel_span.set_attribute("agent.execute.error", str(e)[:200])
+                from opentelemetry.trace import Status, StatusCode
+                otel_span.set_status(Status(StatusCode.ERROR, str(e)[:200]))
+                otel_span.record_exception(e)
+            except Exception:
+                pass
             last_error = self._classify_error(e)
             await self._handle_final_failure(task, checkpoint, last_error)
             if getattr(self, "_resolver", None):
