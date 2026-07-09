@@ -274,8 +274,9 @@ class TestAgentProvenanceRealLLM:
 class TestAgentProvenanceMock:
     def test_mock_output_has_mock_provenance(self):
         # No API key set -> falls into mock mode
-        os.environ.pop("ANTHROPIC_API_KEY", None)
-        os.environ.pop("OPENAI_API_KEY", None)
+        # Save existing keys to restore after the test (avoid polluting later tests)
+        _saved_anthropic = os.environ.pop("ANTHROPIC_API_KEY", None)
+        _saved_openai = os.environ.pop("OPENAI_API_KEY", None)
         os.environ["LLM_PROVIDER"] = "anthropic"
 
         # Reset router to pick up new env
@@ -300,6 +301,12 @@ class TestAgentProvenanceMock:
         badge = result.metadata["data_provenance_badge"]
         assert "MOCK" in badge.upper()
         assert "NOT REAL" in badge.upper()
+
+        # Restore keys (test popped them to force mock mode)
+        if _saved_anthropic is not None:
+            os.environ["ANTHROPIC_API_KEY"] = _saved_anthropic
+        if _saved_openai is not None:
+            os.environ["OPENAI_API_KEY"] = _saved_openai
 
 
 # ── Agent integration: partial output ──
@@ -327,6 +334,10 @@ class TestAgentProvenancePartial:
             temperature=0.5,
         )
         LLMRouter.get_config = lambda self, agent_name, task_complexity=None: test_config
+
+        # Reset mock_mode from previous test (TestAgentProvenanceMock may have set it)
+        default_router._mock_mode = None
+        default_router._anthropic_client = None
 
         from agent_system.agents.product_agent import ProductAgent
         from agent_system.core.agent import TaskContext

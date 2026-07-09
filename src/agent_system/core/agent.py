@@ -170,13 +170,60 @@ Begin."""
           2. _run_with_retry    — main retry loop; returns OutputSchema or raises
           3. _handle_final_failure — record TASK_FAILED event + persist failed checkpoint
           4. _escalate          — optional 4-way resolver (SELF/PEER/HUMAN/ESCALATE)
+
+        When memory_enabled=True (default), this also:
+          - records task start/complete/failure to the experience graph
+          - injects relevant past experiences into task.metadata['experiences']
+            before _run_with_retry, so do_work() can use them as hints
         """
+        # ── Memory hook (P2-3.1) ──────────────────────────────
+        if self.memory_enabled:
+            from agent_system.memory.experience import (
+                record_task_start,
+                record_task_complete,
+                record_task_failure,
+                record_experience,
+                get_relevant_experiences,
+                get_graph,
+            )
+            graph = get_graph()
+            record_task_start(graph, task.task_id, task.input, self.agent_name)
+            # Inject past experiences as hints into task metadata
+            try:
+                experiences = get_relevant_experiences(graph, task.input, max_results=3)
+                if experiences:
+                    if task.metadata is None:
+                        task.metadata = {}
+                    task.metadata["experiences"] = experiences
+            except Exception:
+                # Don't block task execution if experience lookup fails
+                pass
+
         task.started_at = datetime.now(timezone.utc)
         checkpoint = self._setup_checkpoint(task)
         await self._publish_event(EventType.TASK_STARTED, task, {"input_hash": hash(task.input[:200])})
         try:
-            return await self._run_with_retry(task, checkpoint)
+            output = await self._run_with_retry(task, checkpoint)
+            if self.memory_enabled:
+                record_task_complete(graph, task.task_id, output)
+                if not task.metadata.get("skip_experience_recording"):
+                    record_experience(
+                        graph,
+                        task.task_id,
+                        f"Agent {self.agent_name} completed: {task.input[:100]}",
+                        self.agent_name,
+                        success=True,
+                    )
+            return output
         except Exception as e:
+            if self.memory_enabled:
+                record_task_failure(
+                    graph,
+                    task.task_id,
+                    str(e),
+                    self.agent_name,
+                    details={"attempts": getattr(task, "retry_count", 0)},
+                )
             last_error = self._classify_error(e)
             await self._handle_final_failure(task, checkpoint, last_error)
             if getattr(self, "_resolver", None):
