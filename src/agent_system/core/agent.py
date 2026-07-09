@@ -126,6 +126,7 @@ class SmartAgent(BaseModel):
     llm_router: LLMRouter = Field(default_factory=LLMRouter)
     max_retries: int = 3
     enable_escalation: bool = False  # Set to True to enable 4-way resolution
+    memory_enabled: bool = True  # Set False to disable experience recording
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
