@@ -18,7 +18,7 @@ import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import Header
 
 import jwt
@@ -46,29 +46,94 @@ class TokenPayload(BaseModel):
 
 
 class AuthService:
-    """JWT token issuer + verifier."""
+    """JWT token issuer + verifier.
+
+    Secret rotation support (PR-16):
+      - AUTH_SECRETS env var (comma-separated, format "kid:secret,kid:secret,...")
+        - First entry is the CURRENT signing key (used for new tokens)
+        - All entries are valid for VERIFY (so old tokens still work after rotation)
+      - AUTH_SECRET env var (single key) is still supported for backward compat
+        - Auto-converted to a single-key AUTH_SECRETS with kid="default"
+      - Tokens get a `kid` claim so the verifier picks the right key on rotation
+
+    Example rotation scenario:
+      Day 0: AUTH_SECRETS=v1:secret-v1-long-enough-32chars,v0:secret-v0-long-enough-32chars
+              (current=v1, old v0 still verifies)
+      Day 7: AUTH_SECRETS=v2:secret-v2-long-enough-32chars,v1:secret-v1-long-enough-32chars
+              (current=v2, v1 still verifies until all old tokens expire)
+      Day 30: AUTH_SECRETS=v2:secret-v2-long-enough-32chars
+              (old key removed; rotation complete)
+    """
 
     def __init__(self, secret: Optional[str] = None, default_ttl: int = 3600):
-        env_secret = os.environ.get("AUTH_SECRET", "")
-        resolved = secret or env_secret
+        # Resolve secrets: explicit arg > AUTH_SECRETS env > AUTH_SECRET env
+        auth_secrets_env = os.environ.get("AUTH_SECRETS", "").strip()
+        auth_secret_env = os.environ.get("AUTH_SECRET", "").strip()
 
-        # Production guard: require a strong secret
-        if not resolved:
+        if secret:
+            # Explicit single secret -> single-key store with kid="default"
+            self._secrets: List[Tuple[str, str]] = [("default", secret)]
+        elif auth_secrets_env:
+            self._secrets = self._parse_auth_secrets(auth_secrets_env)
+        elif auth_secret_env:
+            # Backward compat: single AUTH_SECRET
+            self._secrets = [("default", auth_secret_env)]
+        else:
             raise RuntimeError(
-                "AUTH_SECRET is not set. "
+                "AUTH_SECRET (or AUTH_SECRETS) is not set. "
                 "In production, set a 32+ character random secret. "
                 "For local dev only, set AUTH_SECRET to any non-empty value."
             )
-        if len(resolved) < 32:
-            import logging as _lg
-            _lg.warning(
-                f"AUTH_SECRET is only {len(resolved)} characters long "
-                f"(recommended: 32+). For production use a longer secret."
-            )
 
-        self.secret = resolved
+        # Production guard: require strong secrets
+        for kid, s in self._secrets:
+            if len(s) < 32:
+                import logging as _lg
+                _lg.warning(
+                    f"AUTH_SECRET[{kid}] is only {len(s)} characters long "
+                    f"(recommended: 32+). For production use a longer secret."
+                )
+        if not self._secrets:
+            raise RuntimeError("No valid secrets configured")
+
+        self.current_kid = self._secrets[0][0]
+        self.current_secret = self._secrets[0][1]
         self.algorithm = "HS256"
         self.default_ttl = default_ttl
+        logger.info(
+            "AuthService: %d secret(s) configured, current kid=%s",
+            len(self._secrets), self.current_kid,
+        )
+
+    @staticmethod
+    def _parse_auth_secrets(raw: str) -> List[Tuple[str, str]]:
+        """Parse 'kid1:secret1,kid2:secret2' -> [('kid1','secret1'), ...]"""
+        result: List[Tuple[str, str]] = []
+        for entry in raw.split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            if ":" not in entry:
+                # No kid prefix; treat whole thing as secret with auto kid
+                kid = f"key{len(result)}"
+                result.append((kid, entry))
+                continue
+            kid, secret = entry.split(":", 1)
+            kid = kid.strip()
+            secret = secret.strip()
+            if not kid or not secret:
+                raise ValueError(
+                    f"Invalid AUTH_SECRETS entry: {entry!r}. "
+                    f"Expected format 'kid:secret'"
+                )
+            result.append((kid, secret))
+        if not result:
+            raise ValueError("AUTH_SECRETS is empty")
+        return result
+
+    def get_keys_for_rotation(self) -> List[Tuple[str, str]]:
+        """Return all (kid, secret) pairs — for ops/audit."""
+        return list(self._secrets)
 
     def issue_token(
         self,
@@ -86,12 +151,35 @@ class AuthService:
             "scopes": scopes or [],
             "iat": now,
             "exp": now + (ttl or self.default_ttl),
+            "kid": self.current_kid,
         }
-        return jwt.encode(payload, self.secret, algorithm=self.algorithm)
+        return jwt.encode(payload, self.current_secret, algorithm=self.algorithm)
 
     def verify_token(self, token: str) -> Optional[TokenPayload]:
+        # Peek at the kid in the (unverified) claims to pick the right key.
+        # We store `kid` in the claims payload (not the JWS header) so
+        # jwt.get_unverified_claims is the right accessor.
+        kid = None
         try:
-            data = jwt.decode(token, self.secret, algorithms=[self.algorithm])
+            unverified = jwt.decode(token, options={"verify_signature": False})
+            kid = unverified.get("kid")
+        except Exception:
+            kid = None
+
+        # Find the right secret
+        secret = None
+        if kid:
+            for k, s in self._secrets:
+                if k == kid:
+                    secret = s
+                    break
+        if not secret:
+            # Fall back to current secret (handles tokens issued before rotation
+            # or tokens without a kid claim)
+            secret = self.current_secret
+
+        try:
+            data = jwt.decode(token, secret, algorithms=[self.algorithm])
             return TokenPayload(**data)
         except jwt.ExpiredSignatureError:
             logger.debug("Token expired")

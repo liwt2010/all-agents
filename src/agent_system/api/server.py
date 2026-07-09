@@ -42,7 +42,10 @@ from agent_system.memory.graph import get_graph, NodeType
 from agent_system.memory.persistence import save_graph, load_graph
 from agent_system.core.observability import MetricsCalculator, tracer
 from agent_system.core.checkpoint_tracker import CheckpointTracker, LiveProgress
-from agent_system.core.security import sanitizer, audit_logger, AuditLogEntry
+from agent_system.core.security import sanitizer  # re-exported from legacy file
+from agent_system.core.audit_logger import get_audit_logger as _get_audit_logger, AuditLogEntry
+# Module-level audit_logger for server.py usage (same instance for the process)
+audit_logger = _get_audit_logger()
 from agent_system.core.auth import (
     AuthService, AuthMiddleware, User, require_auth, get_auth_service,
 )
@@ -168,9 +171,13 @@ if os.environ.get("DISABLE_SECURITY_MIDDLEWARE") != "1":
         # Legacy IP-only limiter as fallback
         app.add_middleware(RateLimitMiddleware, rate_per_minute=int(os.environ.get("RATE_LIMIT_PER_MINUTE", "60")))
 
-# CORS — narrowed to actual production domains.
-# In dev, CORS_DEV_ORIGINS env var (comma-separated) extends this.
-_default_cors = ["http://localhost:5173", "http://127.0.0.1:5173"]
+# CORS — environment-aware (PR-16). Production: explicit origins only.
+from agent_system.core.security.cors import build_cors_config
+_cors_config = build_cors_config()
+logger.info(
+    "CORS configured for env=%s, %d origins, credentials=%s",
+    _cors_config.environment, len(_cors_config.allowed_origins), _cors_config.allow_credentials,
+)
 # WebSocket registry (keyed by task_id, list of subscribers)
 _ws_connections: Dict[str, List[WebSocket]] = {}
 
@@ -178,16 +185,15 @@ _ws_connections: Dict[str, List[WebSocket]] = {}
 _in_flight_tasks: set = set()
 
 
-_extra = os.environ.get("CORS_DEV_ORIGINS", "")
-if _extra:
-    _default_cors.extend(o.strip() for o in _extra.split(",") if o.strip())
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_default_cors,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+app.add_middleware(CORSMiddleware, **_cors_config.to_fastapi_kwargs())
+
+# TLS / HTTPS enforcement (PR-16)
+from agent_system.core.security.tls import (
+    HTTPSRedirectMiddleware, HSTSHeaderMiddleware, SecureCookieChecker,
 )
+app.add_middleware(SecureCookieChecker)
+app.add_middleware(HSTSHeaderMiddleware)
+app.add_middleware(HTTPSRedirectMiddleware)
 
 
 # ── Agent factory ──

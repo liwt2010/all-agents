@@ -404,7 +404,7 @@ The in-memory state per request is just `RequestIDMiddleware` contextvar + per-r
 
 ## 11. Security
 
-### 11.1 Built-in security middleware (PR-7 to PR-12)
+### 11.1 Built-in security middleware (PR-7 to PR-12, PR-16)
 
 - `RequestIDMiddleware` — X-Request-ID propagation
 - `SecurityHeadersMiddleware` — CSP, HSTS, X-Frame-Options
@@ -412,9 +412,113 @@ The in-memory state per request is just `RequestIDMiddleware` contextvar + per-r
 - `RequestSizeLimitMiddleware` — 1 MB default cap
 - `SecretsInRequestMiddleware` — rejects requests containing known secret patterns
 - `InputSanitizer` — prompt injection detection (TrustLevel-aware)
-- `JWT` auth with HS256 (replace with RS256 for multi-issuer)
+- `JWT` auth with HS256 + multi-key rotation support (PR-16)
+- **`CORS` (PR-16)**: environment-aware, denies wildcard in production,
+  enforces https:// origins
+- **`HSTSHeaderMiddleware` (PR-16)**: adds `Strict-Transport-Security` header
+  (on by default in production; max-age 1 year, includeSubDomains)
+- **`HTTPSRedirectMiddleware` (PR-16)**: HTTP→HTTPS 301 redirect; off by default
+  (enable when not behind a TLS-terminating LB)
+- **`SecureCookieChecker` (PR-16)**: enforces `Secure` flag on cookies
+  (off by default; enable in production to catch regressions)
 
-### 11.2 Recommended additional hardening
+### 11.2 CORS in production
+
+Production CORS rules (enforced by `core/security/cors.py`):
+
+- `CORS_ALLOWED_ORIGINS` must be a comma-separated list of explicit origins.
+- `*` wildcard is **rejected** in production.
+- All origins must start with `https://` (or `http://localhost` / `http://127.0.0.1`
+  for dev tunnels).
+- Empty `CORS_ALLOWED_ORIGINS` is allowed (rejects all cross-origin requests).
+
+Example production `.env`:
+
+```bash
+ENVIRONMENT=production
+CORS_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
+CORS_ALLOW_CREDENTIALS=true
+```
+
+### 11.3 TLS / HTTPS
+
+Two strategies supported:
+
+**A. Behind a TLS-terminating LB (cloud LB, nginx-ingress, CloudFront)**
+- Do **NOT** set `TLS_REDIRECT_ENABLED=true` (the LB does the redirect).
+- Set `TLS_HSTS_ENABLED=true` so the app adds the HSTS header itself
+  (the LB may also do this — duplicated HSTS is fine).
+- Configure your LB to set `X-Forwarded-Proto: https` so the app sees
+  the request as HTTPS.
+
+**B. Direct TLS (the app is the TLS endpoint)**
+- Set `TLS_REDIRECT_ENABLED=true` to enable 301 redirects from HTTP→HTTPS.
+- Use a TLS terminator in front (Caddy / nginx / Traefik) that sets
+  `X-Forwarded-Proto: https`.
+- App enforces HSTS via `TLS_HSTS_ENABLED=true`.
+
+Example Kubernetes ingress-nginx config:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-set-headers: |
+      X-Forwarded-Proto: https
+spec:
+  tls:
+  - hosts: [api.example.com]
+    secretName: api-tls
+  rules:
+  - host: api.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: agent-system
+            port: { number: 8000 }
+```
+
+### 11.4 JWT secret rotation
+
+**Rotation procedure (recommended every 90 days, or immediately on suspected
+compromise):**
+
+1. Generate a new secret:
+   ```bash
+   python -c "import secrets; print(f'v1:{secrets.token_urlsafe(48)}')"
+   ```
+
+2. Update `AUTH_SECRETS` to include the new key as the **first** entry
+   (first = current signing key):
+   ```bash
+   AUTH_SECRETS="v1:NEW_SECRET_LONG_32CHARS,v0:OLD_SECRET_LONG_32CHARS"
+   ```
+
+3. Roll the deployment. The app now signs new tokens with v1 but still
+   verifies v0 tokens (graceful rollover).
+
+4. Wait at least 1 token TTL (default 3600s = 1h; check
+   `default_ttl` in `AuthService`) before step 5.
+
+5. Remove v0 from the list once all v0 tokens have expired:
+   ```bash
+   AUTH_SECRETS="v1:NEW_SECRET_LONG_32CHARS"
+   ```
+
+**Backward compatibility:** `AUTH_SECRET=foo` (single key, no `kid` prefix)
+still works — it's auto-converted to a single-key store with `kid="default"`.
+
+**Monitoring:** `AuthService` logs the number of secrets configured on init.
+Alert on `AuthService: 3+ secret(s) configured` (rotation in progress) and
+`AuthService: 1 secret(s) configured` (steady state).
+
+### 11.5 Recommended additional hardening
 
 1. **TLS**: terminate at reverse proxy (nginx, Caddy, cloud LB). Never expose port 8000 directly.
 2. **Network policy**: PostgreSQL on a private network, not internet-routable.
@@ -422,12 +526,15 @@ The in-memory state per request is just `RequestIDMiddleware` contextvar + per-r
 4. **Image scanning**: scan `Dockerfile` images with Trivy / Snyk before deploy.
 5. **SBOM**: maintain a Software Bill of Materials for compliance.
 
-### 11.3 Compliance notes
+### 11.6 Compliance notes
 
 - All sensitive fields auto-redacted in logs
 - Audit log retains 90 days default (configurable)
 - Per-tenant isolation via `tenant_id` in `TaskContext`
 - RBAC: 6 roles, 7 permissions (see `core/auth/`)
+- CORS denies wildcard in production (PR-16)
+- TLS enforced via HSTS + (optional) HTTPS redirect (PR-16)
+- JWT secret rotation with no-downtime (PR-16)
 
 ---
 
