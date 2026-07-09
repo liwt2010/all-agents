@@ -179,13 +179,35 @@ class AutoGenGroupChat:
             api_key = os.environ.get("ANTHROPIC_API_KEY", "")
             base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
 
-        return {
+        kwargs = {
             "model": cfg.model,
             "api_key": api_key,
             "base_url": base_url,
             "temperature": cfg.temperature,
             "max_tokens": cfg.max_tokens,
         }
+        # For non-OpenAI model names (e.g. deepseek-v4-flash, claude-sonnet-4)
+        # OpenAIChatCompletionClient requires an explicit model_info dict
+        # because the model name isn't in its built-in registry.
+        # Provide a generic capability set so the client can classify token
+        # limits correctly. The values are conservative upper bounds that
+        # work for most modern models.
+        if not self._is_known_openai_model(cfg.model):
+            kwargs["model_info"] = {
+                "vision": False,
+                "function_calling": True,
+                "json_output": True,
+                "family": "unknown",
+                "structured_output": True,
+                "multiple_system_messages": False,
+            }
+        return kwargs
+
+    @staticmethod
+    def _is_known_openai_model(model: str) -> bool:
+        """Heuristic: known OpenAI model names start with gpt- or o1/o3/o4."""
+        m = (model or "").lower()
+        return m.startswith(("gpt-", "o1", "o3", "o4"))
 
     def _format_task(
         self,

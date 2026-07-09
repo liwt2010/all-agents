@@ -524,13 +524,23 @@ class _PeerDiscussionAdapter:
         self._has_autogen = False
         try:
             from agent_system.core.autogen_discussion import AutoGenGroupChat, HAS_AUTOGEN
-            # Only use AutoGen if the package is installed AND an API key is configured.
-            api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-            self._has_autogen = HAS_AUTOGEN and bool(api_key)
+            # Only use AutoGen if the package is installed AND an OpenAI-compatible
+            # key is configured. AutoGen uses OpenAIChatCompletionClient which only
+            # works with OpenAI models (or models registered in its model_info DB).
+            # For anthropic provider we always go straight to legacy DiscussionMixin.
+            provider = os.environ.get("LLM_PROVIDER", "openai").strip().lower()
+            openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+            self._has_autogen = (
+                HAS_AUTOGEN and bool(openai_key) and provider == "openai"
+            )
         except ImportError:
             self._has_autogen = False
-        if not self._has_autogen:
-            self._init_legacy_mixin(original_agent)
+        # ALWAYS init legacy mixin so the autogen->legacy fallback path has
+        # `discuss` / `_all_peers` available. Previously the legacy init
+        # only ran when _has_autogen=False, which left the adapter broken
+        # when autogen was enabled but failed at runtime (e.g. model_info
+        # missing for non-OpenAI models).
+        self._init_legacy_mixin(original_agent)
 
     def _init_legacy_mixin(self, original_agent: SmartAgent):
         """Fallback: use the old DiscussionMixin (single-round parallel)."""
