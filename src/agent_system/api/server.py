@@ -182,6 +182,33 @@ logger.info(
     "CORS configured for env=%s, %d origins, credentials=%s",
     _cors_config.environment, len(_cors_config.allowed_origins), _cors_config.allow_credentials,
 )
+
+# Optional dependency check: AutoGen (PEER path upgrade). If not installed,
+# PEER gracefully falls back to the lightweight DiscussionMixin — but users
+# should know they're missing the multi-agent-debate upgrade. Emit a clear
+# startup banner so the degradation is never silent.
+try:
+    from agent_system.core.autogen_discussion import HAS_AUTOGEN  # noqa: E402
+    if HAS_AUTOGEN:
+        logger.info(
+            "PEER path: AutoGen 0.4+ enabled (full multi-agent debate available)."
+        )
+    else:
+        logger.warning(
+            "================================================================\n"
+            " PEER path running in FALLBACK mode: AutoGen 0.4+ not installed.\n"
+            "   Multi-agent debate is disabled. Resolver will use the lightweight\n"
+            "   DiscussionMixin path (single-shot consensus, no AutoGen team chat).\n"
+            "   To enable full PEER: pip install 'autogen-agentchat>=0.4' 'autogen-ext[openai]>=0.4'\n"
+            "================================================================"
+        )
+except Exception as _e:  # pragma: no cover — defensive only
+    logger.debug(f"Optional autogen probe failed: {_e}")
+
+# Cached probe result so /api/health endpoint can report PEER status
+# without re-importing the autogen package on every request.
+from agent_system.core.autogen_discussion import HAS_AUTOGEN as _HAS_AUTOGEN_CACHE  # noqa: E402
+
 # WebSocket registry (keyed by task_id, list of subscribers)
 _ws_connections: Dict[str, List[WebSocket]] = {}
 
@@ -238,6 +265,7 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "0.1.0"
     uptime: float = 0.0
+    peer_autogen_enabled: bool = False  # AutoGen 0.4+ installed + PEER path upgraded
 
 
 class TokenRequest(BaseModel):
@@ -258,7 +286,10 @@ class TokenResponse(BaseModel):
 async def health():
     """Liveness probe — always returns 200."""
     uptime = (datetime.now(timezone.utc) - _start_time).total_seconds()
-    return HealthResponse(uptime=uptime)
+    return HealthResponse(
+        uptime=uptime,
+        peer_autogen_enabled=_HAS_AUTOGEN_CACHE,
+    )
 
 
 @app.get("/api/ready")
