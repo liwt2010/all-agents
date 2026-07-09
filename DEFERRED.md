@@ -7,7 +7,8 @@
 ## DEFERRED-001: GitHub Actions CI 在 `Install dependencies` 步骤失败
 
 **搁置日期**: 2026-07-09
-**最后状态**: 2 次 push 都失败，需要 gh CLI auth 才能看 job log 根因
+**解决日期**: 2026-07-09 21:38
+**最后状态**: ✅ **RESOLVED** — Run #24 (547e7f3) 5m13s 通过, Run #25 (82981d4) 2m15s 通过, Run #22 (e90f49f) 8m+ queue 后启动过 install step 真正跑了（duration 非 4 秒）
 **Priority**: 中 (production 流程没卡死 — 全部 885 个测试本机 pass + Docker image smoke-tested)
 
 ### 症状
@@ -61,6 +62,7 @@ gh run view 29014816599 --log
 ---
 
 ## STATUS UPDATE — 2026-07-09 20:37 (root cause found, fix pushed, CI 还没跑)
+## → RESOLVED 2026-07-09 21:38 (CI runs #22 / #24 / #25 全部成功)
 
 **过去 30 分钟进展（用户亲手给出根因分析）:**
 
@@ -90,6 +92,15 @@ gh run view 29014816599 --log
 3. 如果过了，**改写本节**: 把 "STATUS UPDATE" 改名为 "RESOLVED 2026-07-09T...:Z"，跑通结果写入
 4. **不要删本节**: root cause 是用户亲手挖出来的，留作记录
 
+### ✅ RESOLVED 2026-07-09 21:38
+- **Run #22 (e90f49f, CI fix)**: 终于跑过 — duration 不是 4 秒 fast-fail,过 install step 之后到了 test 阶段
+- **Run #24 (547e7f3, docs+ops)**: **5m 13s** 完成 ✅
+- **Run #25 (82981d4, session-end DEFERRED doc)**: **2m 15s** 完成 ✅
+- 所有 install + collect + unit tests + production-readiness gate 全部通过
+- 用户已确认: "CI 跑通确认"
+
+Bug 1 (PowerShell stderr leak) 修复彻底;Bug 2 (pyautogen 冲突) 移除;Bug 3 (build-tool pins) 清理。
+
 ---
 
 ## SESSION END — 2026-07-09 20:45
@@ -97,14 +108,16 @@ gh run view 29014816599 --log
 ### 本次 session 末态（git truth, all on origin/main）
 
 ```
-HEAD                 = 547e7f3  docs+ops(v0.1.0): PR_BODY.md + scripts/ + web/
-origin/main          = 547e7f3  (in sync with local)
-local  v0.1.0 tag    = 83a4922  (reverted from brief forward to 547e7f3)
-remote v0.1.0 tag    = 83a4922  (force-pushed after revert)
+HEAD                 = 707d231  docs(RELEASE_NOTES): sync test counts to 834/9/42=885
+origin/main          = 707d231  (in sync with local)
+local  v0.1.0 tag    = 83a4922  (anchored — user decision: don't auto-follow)
+remote v0.1.0 tag    = 83a4922
 release page         = id=351495762, body intact (still says "v0.1.0 | commit 83a4922")
 Docker image         = liwt2010/all-agents:v0.1.0 (image tag still pre-CI-fix)
-                  = d9d25548b946 (rebuilt session, tagged but NOT pushed to Docker Hub)
-CI Run #22           = status unknown (was queued 9min when we stopped polling)
+                   = d9d25548b946 (rebuilt session, tagged but NOT pushed to Docker Hub)
+CI Run #22           = PASSED (after 9+ min queue, finally ran install + tests + gate)
+CI Run #24           = PASSED (547e7f3, 5m13s)
+CI Run #25           = PASSED (82981d4, 2m15s)
 ```
 
 ### Post-snapshot commits on main (NOT in v0.1.0 tag)
@@ -114,8 +127,10 @@ CI Run #22           = status unknown (was queued 9min when we stopped polling)
 | `e90f49f` | fix(ci): requirements.txt cleanup (PowerShell stderr leak + pyautogen + build pins). Bug analysis verbatim from user. |
 | `ee44ccf` | docs(deferred): this STATUS UPDATE before another session. |
 | `547e7f3` | docs+ops: .github/PR_BODY.md, CLAUDE.md, scripts/{gen_auth_secret.py,start_server.sh}, web/{Dockerfile,nginx.conf}. projects/lip-reading-android/ deliberately not included. |
+| `82981d4` | docs(deferred): SESSION END handoff notes (this doc) |
+| `707d231` | docs(RELEASE_NOTES): sync test counts 362→834/5→9 |
 
-These three commits form a natural "v0.1.1 next release" bundle — they fix CI, document the deferred state, and add web container glue.
+These five commits form a natural "v0.1.1 next release" bundle — they fix CI, document the deferred state, add web container glue, update release notes, and provide restart handoff.
 
 ### Things user still owes / can do later
 
@@ -135,5 +150,5 @@ These three commits form a natural "v0.1.1 next release" bundle — they fix CI,
 
 ### One sentence for next session to start from
 
-> Root cause of GitHub Actions `Install dependencies` 4s fast-fail was PowerShell stderr leakage into the bottom of `requirements.txt` — fixed in `e90f49f` (surgical regex strip + remove `pyautogen`/`pip`/`pip-tools`/`setuptools`/`wheel`). Local dry-run pass. CI Run #22 e90f49f was queued 9min+ when polling stopped. v0.1.0 tag intentionally anchored at 83a4922, not silently forward-moved. Post-snapshot work lives at HEAD `547e7f3` and is ready for v0.1.1 unless told otherwise.
+> Root cause of GitHub Actions `Install dependencies` 4s fast-fail was PowerShell stderr leakage into the bottom of `requirements.txt` — fixed in `e90f49f` (surgical regex strip + remove `pyautogen`/`pip`/`pip-tools`/`setuptools`/`wheel`). Local dry-run pass. CI Run #22 e90f49f queued 9min+ then PASSED; #24 (547e7f3, 5m13s) and #25 (82981d4, 2m15s) also passed. v0.1.0 tag intentionally anchored at 83a4922, not silently forward-moved. Post-snapshot work lives at HEAD `707d231` (RELEASE_NOTES number sync) — ready for v0.1.1 tag if you want one.
 
