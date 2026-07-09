@@ -1,10 +1,9 @@
 """
-Tests: AgentRegistry (PR B / registry 化)
+Tests: AgentRegistry (PR 5 / registry 化)
 
-PR 5 / PR 3 重做: 验证 AgentRegistry 自动发现 + resolver 使用 registry 而非 hardcoded list。
+Verifies AgentRegistry auto-discovery + resolver uses registry (not hardcoded list).
 """
 
-import importlib
 import pytest
 
 from agent_system.core.agent import SmartAgent, TaskContext, OutputSchema
@@ -12,24 +11,33 @@ from datetime import datetime, timezone
 from pydantic import ConfigDict
 
 
-_AGENT_MODULES = (
-    'product_agent', 'tech_agent', 'test_agent', 'ceo_agent',
-    'deploy_agent', 'devops_agent', 'docs_agent', 'review_agent',
-    'security_agent',
+_AGENT_CLASSES = (
+    "ProductAgent", "TechAgent", "TestAgent", "CEOAgent",
+    "DeployAgent", "DevOpsAgent", "DocsAgent", "ReviewAgent",
+    "SecurityAgent",
 )
 
 
 @pytest.fixture(autouse=True)
 def fresh_registry():
-    """Reset and re-register all 9 agents before each test."""
-    from agent_system.agents import agent_registry
+    """Reset the registry between tests so state doesn't leak.
+
+    IMPORTANT: We do NOT use `importlib.reload()` — that would re-execute the
+    agent module bodies, replacing the class objects and invalidating class
+    refs held by other modules (discussion mixin, peer discovery, etc.).
+    Instead we just reset() the registry and re-register the existing classes.
+    This keeps class identity stable while giving each test a fresh registry.
+    """
+    from agent_system.agents import agent_registry, register_agent
     agent_registry.reset()
-    # Force re-execution of module bodies (which re-trigger @register_agent)
-    for name in _AGENT_MODULES:
-        try:
-            importlib.reload(importlib.import_module(f'agent_system.agents.{name}'))
-        except Exception:
-            pass
+    # Re-register the already-imported classes (idempotent, no reload needed)
+    from agent_system.agents import (
+        ProductAgent, TechAgent, TestAgent, CEOAgent,
+        DeployAgent, DevOpsAgent, DocsAgent, ReviewAgent, SecurityAgent,
+    )
+    for cls in (ProductAgent, TechAgent, TestAgent, CEOAgent,
+                DeployAgent, DevOpsAgent, DocsAgent, ReviewAgent, SecurityAgent):
+        register_agent(cls)
     yield
 
 
@@ -69,18 +77,25 @@ class TestAgentRegistry:
         assert agent_registry.count() == 9
 
     def test_reset_then_reindex(self):
+        """After reset(), only explicitly re-registered agents are present.
+        We avoid importlib.reload() (pollutes other modules holding class refs);
+        instead use the public register_agent() entry point.
+        """
         from agent_system.agents import agent_registry
-        from agent_system.core.registry import discover_agents
+        from agent_system.core.registry import discover_agents, register_agent
+        from agent_system.agents import ProductAgent
+        # The fixture re-registered all 9 agents before this test.
         original_count = agent_registry.count()
         assert original_count == 9
         agent_registry.reset()
-        # After reset, count is 0 — discover_agents alone won't re-register (Python caches
-        # module bodies), so reload is required to re-trigger @register_agent decorators.
-        importlib.reload(importlib.import_module('agent_system.agents.product_agent'))
-        assert agent_registry.count() == 1  # only product_agent re-registered
-        # discover_agents without reload is a no-op for already-imported modules
-        discover_agents()
+        assert agent_registry.count() == 0
+        # Re-register a single agent via the public API.
+        register_agent(ProductAgent)
         assert agent_registry.count() == 1
+        # discover_agents without reloading is a no-op for already-imported modules.
+        # It only fires @register_agent for modules that aren't yet imported.
+        discover_agents()
+        assert agent_registry.count() == 1  # only ProductAgent registered
 
 
 class TestRegistryBackedPeerDiscovery:

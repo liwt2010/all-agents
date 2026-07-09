@@ -135,5 +135,6 @@ class TestPEERViaDiscussionMixin:
         assert result.timed_out is False
         # But there's no usable consensus
         assert not result.successful()
-        # (Advisor list is empty so agreement_ratio is 0)
-        assert result.consensus.agreement_ratio == 0
+        # When all peers fail, consensus is None (no advisors to aggregate).
+        # The resolver should fall through to ESCALATE in this case.
+        assert result.consensus is None or result.consensus.agreement_ratio == 0

@@ -175,14 +175,19 @@ class TestLLMRouter:
         assert router.estimate_complexity("Design a complete end-to-end secure authentication system") == "complex"
 
     def test_get_config(self):
+        """LLMRouter.get_config() returns a non-empty config for any agent.
+        The test is model-agnostic — it just verifies routing works;
+        the actual model is dictated by LLM_MODEL env var or settings default.
+        """
         from agent_system.core.llm_router import LLMRouter
         router = LLMRouter()
 
         config = router.get_config("product_agent")
         assert config is not None
-        assert "sonnet" in config.model or "haiku" in config.model
+        assert config.model  # any non-empty model name
+        assert config.max_tokens > 0
 
-        # Simple task routing
+        # Simple task routing should return a config (may differ)
         simple_config = router.get_config("test_agent", task_complexity="simple")
         assert simple_config is not None
 

@@ -265,12 +265,19 @@ class TestObservability:
         assert rate.value == pytest.approx(1/3, rel=0.01)
 
     def test_reflection_trigger_rate(self):
+        """Reflection rate = count(reflection decisions) / count(failures).
+        Seed: 1 FAILURE node + 1 DECISION node of type 'reflection' => rate == 1.0.
+        """
         g = get_graph()
         g.add_node(GraphNode(id="f1", type=NodeType.FAILURE, content={"error": "err1"}))
+        g.add_node(GraphNode(
+            id="r1", type=NodeType.DECISION,
+            content={"type": "reflection", "summary": "agent retried after failure"},
+        ))
 
         calc = MetricsCalculator(g)
         rate = calc.reflection_trigger_rate()
-        assert rate.value == 1.0
+        assert rate.value == 1.0, f"expected 1.0 with 1 reflection + 1 failure, got {rate.value} ({rate.labels})"
 
     def test_experience_effectiveness(self):
         g = get_graph()

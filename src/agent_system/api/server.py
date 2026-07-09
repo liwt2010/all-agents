@@ -42,8 +42,12 @@ from agent_system.memory.graph import get_graph, NodeType
 from agent_system.memory.persistence import save_graph, load_graph
 from agent_system.core.observability import MetricsCalculator, tracer
 from agent_system.core.checkpoint_tracker import CheckpointTracker, LiveProgress
-from agent_system.core.security import sanitizer  # re-exported from legacy file
+from agent_system.core.security import InputSanitizer  # re-exported from legacy file
 from agent_system.core.audit_logger import get_audit_logger as _get_audit_logger, AuditLogEntry
+# Module-level sanitizer INSTANCE (legacy module-level `sanitizer` was the class, not an instance).
+# Callers must use the instance, not the class, to avoid passing input as `self`.
+_input_sanitizer = InputSanitizer()
+sanitizer = _input_sanitizer
 # Module-level audit_logger for server.py usage (same instance for the process)
 audit_logger = _get_audit_logger()
 from agent_system.core.auth import (
