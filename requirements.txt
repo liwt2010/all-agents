@@ -67,7 +67,6 @@ pytest-asyncio==1.4.0
 pytest-cov==7.1.0
 python-dotenv==1.2.2
 python-multipart==0.0.32
-pywin32==312
 PyYAML==6.0.3
 redis==8.0.1
 referencing==0.37.0
