@@ -23,12 +23,12 @@ class CodeSearchTool(Tool):
         "required": ["pattern", "path"],
     }
 
-    async def execute(self, inputs: Dict[str, Any]) -> ToolResult:
+    async def execute(self, inputs: dict[str, Any]) -> ToolResult:
         try:
             pattern = inputs["pattern"]
             root = inputs["path"]
             file_pattern = inputs.get("file_pattern", "*")
-            results: List[Dict] = []
+            results: list[dict] = []
 
             for dirpath, _, filenames in os.walk(root):
                 for fname in filenames:
@@ -72,7 +72,7 @@ class RunTestTool(Tool):
         "required": ["command"],
     }
 
-    async def execute(self, inputs: Dict[str, Any]) -> ToolResult:
+    async def execute(self, inputs: dict[str, Any]) -> ToolResult:
         import subprocess
         import sys
         try:

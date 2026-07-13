@@ -140,7 +140,7 @@ def path(
 
 @graph_app.command()
 def save(
-    path: Optional[str] = typer.Option(None, "--path", "-p", help="Save directory"),
+    path: str | None = typer.Option(None, "--path", "-p", help="Save directory"),
 ):
     """Save graph to disk"""
     from pathlib import Path
@@ -152,7 +152,7 @@ def save(
 
 @graph_app.command()
 def load(
-    path: Optional[str] = typer.Option(None, "--path", "-p", help="Load directory"),
+    path: str | None = typer.Option(None, "--path", "-p", help="Load directory"),
 ):
     """Load graph from disk"""
     from pathlib import Path

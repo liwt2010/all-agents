@@ -36,7 +36,7 @@ def restore_from_tar(
     tar_path: str,
     target_dir: str,
     verify: bool = True,
-    components_to_restore: Optional[list] = None,
+    components_to_restore: list | None = None,
 ) -> dict:
     """
     Restore from a backup tarball.
@@ -172,7 +172,7 @@ def _recompute_component_checksum(tar: tarfile.TarFile, component_name: str) -> 
     return h.hexdigest()
 
 
-def main(argv: Optional[list] = None):
+def main(argv: list | None = None):
     parser = argparse.ArgumentParser(description="Restore from backup tarball")
     parser.add_argument("--from", dest="from_path", required=True, help="Path to backup-*.tar.gz")
     parser.add_argument("--target-dir", dest="target_dir", required=True, help="Destination directory")

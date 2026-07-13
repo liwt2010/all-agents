@@ -41,7 +41,7 @@ def generate_python_sdk(
     spec_path: Path,
     output_dir: Path,
     project_name: str = "agent-system-client",
-    config_path: Optional[Path] = None,
+    config_path: Path | None = None,
 ) -> bool:
     """
     Run openapi-python-client to generate a Python SDK from the spec.

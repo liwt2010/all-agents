@@ -35,11 +35,11 @@ class Resource(BaseModel):
     tenant_id: str = "default"
     owner_id: str = ""
     visibility: SpaceVisibility = SpaceVisibility.PRIVATE
-    perm_group_ids: List[str] = Field(default_factory=list)
-    group_ids: List[str] = Field(default_factory=list)
-    project_ids: List[str] = Field(default_factory=list)
-    shared_with: List[str] = Field(default_factory=list)  # direct user ids
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    perm_group_ids: list[str] = Field(default_factory=list)
+    group_ids: list[str] = Field(default_factory=list)
+    project_ids: list[str] = Field(default_factory=list)
+    shared_with: list[str] = Field(default_factory=list)  # direct user ids
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class UserContext(BaseModel):
@@ -47,9 +47,9 @@ class UserContext(BaseModel):
     user_id: str
     tenant_id: str = "default"
     global_role: str = "user"  # user / admin / platform_admin
-    perm_group_ids: List[str] = Field(default_factory=list)
-    group_ids: List[str] = Field(default_factory=list)
-    project_ids: List[str] = Field(default_factory=list)
+    perm_group_ids: list[str] = Field(default_factory=list)
+    group_ids: list[str] = Field(default_factory=list)
+    project_ids: list[str] = Field(default_factory=list)
     is_agent: bool = False
 
     @classmethod
@@ -87,12 +87,12 @@ class AccessControl:
     """
 
     def __init__(self):
-        self._resource_store: Dict[str, Resource] = {}
+        self._resource_store: dict[str, Resource] = {}
 
     def register_resource(self, resource: Resource):
         self._resource_store[resource.id] = resource
 
-    def get_resource(self, resource_id: str) -> Optional[Resource]:
+    def get_resource(self, resource_id: str) -> Resource | None:
         return self._resource_store.get(resource_id)
 
     def can_read(self, user: UserContext, resource: Resource) -> bool:
@@ -198,9 +198,9 @@ class AccessControl:
     def filter_accessible(
         self,
         user: UserContext,
-        resources: List[Resource],
+        resources: list[Resource],
         access_type: str = "read",
-    ) -> List[Resource]:
+    ) -> list[Resource]:
         """Filter a list of resources to only accessible ones"""
         if access_type == "read":
             return [r for r in resources if self.can_read(user, r)]
@@ -236,7 +236,7 @@ access_control = AccessControl()
 
 def require_space(
     visibility: SpaceVisibility,
-    perm_group_ids: Optional[List[str]] = None,
+    perm_group_ids: list[str] | None = None,
 ):
     """Decorator: mark a resource with required space visibility"""
     def decorator(func):
@@ -249,7 +249,7 @@ def require_space(
 class SpaceContext(BaseModel):
     """Execution context for an agent within a space"""
     user: UserContext = Field(default_factory=UserContext.system)
-    resource: Optional[Resource] = None
+    resource: Resource | None = None
     visibility: SpaceVisibility = SpaceVisibility.PRIVATE
 
     def assert_read(self):

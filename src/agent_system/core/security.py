@@ -33,7 +33,7 @@ class InputValidationResult(BaseModel):
     """Result of input validation"""
     valid: bool = True
     sanitized: str = ""
-    issues: List[str] = Field(default_factory=list)
+    issues: list[str] = Field(default_factory=list)
     risk_level: str = "low"  # low / medium / high / critical
 
 
@@ -44,7 +44,7 @@ class AuditLogEntry(BaseModel):
     action: str = ""
     resource_id: str = ""
     resource_type: str = ""
-    details: Dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)
     ip_address: str = ""
     user_agent: str = ""
     outcome: str = "success"  # success / failure / denied
@@ -131,7 +131,7 @@ class InputSanitizer:
             risk_level=risk_level,
         )
 
-    def _detect_injection(self, text: str) -> List[str]:
+    def _detect_injection(self, text: str) -> list[str]:
         """Detect prompt injection attempts"""
         issues = []
         text_lower = text.lower()
@@ -142,7 +142,7 @@ class InputSanitizer:
 
         return issues
 
-    def _detect_sensitive(self, text: str) -> List[str]:
+    def _detect_sensitive(self, text: str) -> list[str]:
         """Detect sensitive data in input"""
         issues = []
         text_lower = text.lower()
@@ -163,7 +163,7 @@ class InputSanitizer:
         sanitized = re.sub(r'(token\s*[:=]\s*)(\S+)', r'\1[REDACTED]', sanitized, flags=re.IGNORECASE)
         return sanitized
 
-    def _assess_risk(self, injection_issues: List[str], sensitive_issues: List[str]) -> str:
+    def _assess_risk(self, injection_issues: list[str], sensitive_issues: list[str]) -> str:
         """Assess risk level from issues"""
         if len(injection_issues) >= 3:
             return "critical"
@@ -218,12 +218,12 @@ class AuditLogger:
 
     def query(
         self,
-        user_id: Optional[str] = None,
-        action: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        user_id: str | None = None,
+        action: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         limit: int = 100,
-    ) -> List[AuditLogEntry]:
+    ) -> list[AuditLogEntry]:
         """Query audit logs with filters"""
         import json
 

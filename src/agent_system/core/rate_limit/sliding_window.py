@@ -51,12 +51,12 @@ class SlidingWindowLimiter:
         self.limit = limit
         self.window = window_seconds
         self.scope = scope
-        self._buckets: Dict[str, Deque[float]] = defaultdict(deque)
+        self._buckets: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
         self._cleanup_interval = cleanup_interval
         self._last_cleanup = time.time()
 
-    def _evict_old(self, bucket: Deque[float], now: float) -> None:
+    def _evict_old(self, bucket: deque[float], now: float) -> None:
         cutoff = now - self.window
         while bucket and bucket[0] < cutoff:
             bucket.popleft()
@@ -71,7 +71,7 @@ class SlidingWindowLimiter:
         for k in stale:
             del self._buckets[k]
 
-    def check(self, key: str, now: Optional[float] = None) -> LimitDecision:
+    def check(self, key: str, now: float | None = None) -> LimitDecision:
         """
         Check whether a request for `key` is allowed.
 
@@ -106,7 +106,7 @@ class SlidingWindowLimiter:
                     key=key,
                 )
 
-    def peek(self, key: str, now: Optional[float] = None) -> LimitDecision:
+    def peek(self, key: str, now: float | None = None) -> LimitDecision:
         """Check without recording. Useful for inspection / tests."""
         now = now if now is not None else time.time()
         with self._lock:
@@ -134,14 +134,14 @@ class SlidingWindowLimiter:
                     key=key,
                 )
 
-    def reset(self, key: Optional[str] = None) -> None:
+    def reset(self, key: str | None = None) -> None:
         with self._lock:
             if key:
                 self._buckets.pop(key, None)
             else:
                 self._buckets.clear()
 
-    def stats(self) -> Dict[str, int]:
+    def stats(self) -> dict[str, int]:
         """Return count of active keys (for monitoring)."""
         with self._lock:
             return {"active_keys": len(self._buckets)}

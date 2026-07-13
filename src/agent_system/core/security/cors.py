@@ -37,10 +37,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CORSConfig:
-    allowed_origins: List[str]
+    allowed_origins: list[str]
     allow_credentials: bool
-    allow_methods: List[str]
-    allow_headers: List[str]
+    allow_methods: list[str]
+    allow_headers: list[str]
     max_age: int
     environment: str
 
@@ -66,11 +66,11 @@ def _is_https_or_localhost(origin: str) -> bool:
 
 
 def build_cors_config(
-    environment: Optional[str] = None,
-    allowed_origins_env: Optional[str] = None,
-    dev_origins_env: Optional[str] = None,
-    allow_credentials: Optional[bool] = None,
-    max_age: Optional[int] = None,
+    environment: str | None = None,
+    allowed_origins_env: str | None = None,
+    dev_origins_env: str | None = None,
+    allow_credentials: bool | None = None,
+    max_age: int | None = None,
 ) -> CORSConfig:
     """
     Build a CORSConfig for the current environment.

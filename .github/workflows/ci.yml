@@ -1,4 +1,4 @@
-name: CI
+﻿name: CI
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
           PYTHONPATH: src
         run: |
           # Fail fast on ModuleNotFoundError or import errors so the
-          # actual test run log isn't polluted by ImportError noise.
+          # actual test run log is not polluted by ImportError noise.
           pytest tests/ --collect-only -q --ignore=tests/test_pipeline_e2e_real_llm.py \
             --ignore=tests/test_resolver_peer_real_llm.py \
             --ignore=tests/test_data_provenance.py
@@ -55,28 +55,26 @@ jobs:
           pytest tests/test_production_readiness.py -v
         continue-on-error: false
 
-      - name: Lint + type-check (advisory)
-        # ADVISORY ONLY: violations are printed but never fail the job.
-        # Goal: surface the current state of the codebase against ruff + mypy
-        # configured in pyproject.toml, so we can progressively tighten
-        # rules in follow-up commits instead of fixing 1k+ warnings in one go.
-        # Future commits can:
-        #   1. Promote per-rule to fail-on (remove `|| true`)
-        #   2. Move to per-file ignores for noisy modules
-        #   3. Tighten mypy from `disallow_untyped_defs = False` to `True`
+      - name: Lint + type-check (strict)
+        # FIXED: Removed || true and continue-on-error: true
+        # Phase 1: Strict ruff on core modules (E/F/W/B - correctness only)
+        # Phase 2 (future): Add UP006/UP045 after batch fix via ruff check --fix
+        # Phase 3 (future): Remove per-file-ignores and promote all rules
         env:
           PYTHONPATH: src
         run: |
-          echo "=== ruff (advisory) ==="
-          ruff check src/ tests/ || true
-          echo "=== mypy (advisory) ==="
-          mypy src/ || true
-        continue-on-error: true
+          echo "=== ruff strict (core modules, E/F/W/B rules) ==="
+          ruff check src/agent_system/core/ src/agent_system/memory/ src/agent_system/storage/ --select=E,F,W,B
+          echo "=== ruff advisory (all modules, informational) ==="
+          ruff check src/ tests/ --select=E,F,W,I,UP,B,C4,SIM || true
+          echo "=== mypy strict (core modules) ==="
+          mypy src/agent_system/core/ src/agent_system/memory/ src/agent_system/storage/
+        continue-on-error: false
 
   real-llm-smoke:
     name: Real-LLM smoke (manual / weekly)
     runs-on: ubuntu-latest
-    # Only run on main + manual dispatch. PRs don't have access to
+    # Only run on main + manual dispatch. PRs dont have access to
     # the real API key (CI secret).
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:

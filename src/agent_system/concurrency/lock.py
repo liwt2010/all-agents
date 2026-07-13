@@ -28,7 +28,7 @@ class LockRecord(BaseModel):
     holder: str
     acquired_at: float
     expires_at: float
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class LockBusyError(Exception):
@@ -49,7 +49,7 @@ class ResourceLock:
     """
 
     def __init__(self, default_ttl: int = 300):
-        self._locks: Dict[str, LockRecord] = {}
+        self._locks: dict[str, LockRecord] = {}
         self.default_ttl = default_ttl
         self._lock = asyncio.Lock()  # for atomicity within this process
 
@@ -64,8 +64,8 @@ class ResourceLock:
         self,
         resource: str,
         holder: str,
-        ttl: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        ttl: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> bool:
         """Try to acquire a lock. Returns True on success, False on contention."""
         async with self._lock:
@@ -99,7 +99,7 @@ class ResourceLock:
         self,
         resource: str,
         holder: str,
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
     ) -> bool:
         """Extend the lock TTL. Must be the holder."""
         async with self._lock:
@@ -115,7 +115,7 @@ class ResourceLock:
             await self._gc()
             return resource in self._locks
 
-    async def get_holder(self, resource: str) -> Optional[str]:
+    async def get_holder(self, resource: str) -> str | None:
         async with self._lock:
             await self._gc()
             rec = self._locks.get(resource)
@@ -126,7 +126,7 @@ class ResourceLock:
         self,
         resource: str,
         holder: str,
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
     ):
         """Context manager: acquire lock, run body, release (or raise on contention)."""
         acquired = await self.acquire(resource, holder, ttl=ttl)
@@ -138,7 +138,7 @@ class ResourceLock:
         finally:
             await self.release(resource, holder)
 
-    async def stats(self) -> Dict[str, Any]:
+    async def stats(self) -> dict[str, Any]:
         async with self._lock:
             await self._gc()
             return {
@@ -151,7 +151,7 @@ class ResourceLock:
 
 
 # Global instance
-_default_lock: Optional[ResourceLock] = None
+_default_lock: ResourceLock | None = None
 
 
 def get_resource_lock() -> ResourceLock:

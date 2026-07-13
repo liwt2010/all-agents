@@ -37,7 +37,7 @@ DEFAULT_HALF_LIFE_DAYS = 30.0
 
 def decay_factor(
     node: GraphNode,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
     half_life_days: float = DEFAULT_HALF_LIFE_DAYS,
 ) -> float:
     """
@@ -57,7 +57,7 @@ def decay_factor(
 def effective_score(
     similarity: float,
     node: GraphNode,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
     half_life_days: float = DEFAULT_HALF_LIFE_DAYS,
 ) -> float:
     """Combine similarity with time decay."""
@@ -72,7 +72,7 @@ class EmbeddingBackend(ABC):
     name: str = "base"
 
     @abstractmethod
-    def embed(self, texts: Sequence[str]) -> List[List[float]]:
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
         """Return a vector per text."""
 
     @abstractmethod
@@ -86,11 +86,11 @@ class KeywordBackend(EmbeddingBackend):
     """Original Jaccard overlap. Always available, no dependencies."""
     name = "keyword"
 
-    def embed(self, texts: Sequence[str]) -> List[List[float]]:
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
         # Each text becomes a set of word-presence indicators.
         return [self._word_set(t) for t in texts]
 
-    def _word_set(self, text: str) -> List[float]:
+    def _word_set(self, text: str) -> list[float]:
         words = (text or "").lower().split()
         # Truncate to keep vectors small.
         return [1.0 if w in words else 0.0 for w in set(words)]
@@ -147,7 +147,7 @@ class TfidfBackend(EmbeddingBackend):
         self._fitted = False
         self._vectorizer = None
         self._corpus_vectors = None
-        self._corpus_texts: List[str] = []
+        self._corpus_texts: list[str] = []
 
     def _fit(self, texts: Sequence[str]):
         if not texts:
@@ -162,7 +162,7 @@ class TfidfBackend(EmbeddingBackend):
         self._corpus_texts = list(texts)
         self._fitted = True
 
-    def embed(self, texts: Sequence[str]) -> List[List[float]]:
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
         # If no corpus has been fit, fit on the given texts (single-text mode).
         if not self._fitted:
             self._fit(texts)
@@ -182,7 +182,7 @@ class TfidfBackend(EmbeddingBackend):
             return 0.0
         return dot / (na * nb)
 
-    def find_top_k(self, query: str, candidates: Sequence[str], k: int = 5) -> List[Tuple[int, float]]:
+    def find_top_k(self, query: str, candidates: Sequence[str], k: int = 5) -> list[tuple[int, float]]:
         """Convenience: return top-k (index, similarity) pairs."""
         if not candidates:
             return []
@@ -211,7 +211,7 @@ class SentenceTransformerBackend(EmbeddingBackend):
             ) from e
         self.model = SentenceTransformer(model_name)
 
-    def embed(self, texts: Sequence[str]) -> List[List[float]]:
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
         return [v.tolist() for v in self.model.encode(list(texts), show_progress_bar=False)]
 
     def similarity(self, a: Sequence[float], b: Sequence[float]) -> float:
@@ -227,10 +227,10 @@ class SentenceTransformerBackend(EmbeddingBackend):
 
 # ── Auto-select backend ──
 
-_default_backend: Optional[EmbeddingBackend] = None
+_default_backend: EmbeddingBackend | None = None
 
 
-def get_backend(force: Optional[str] = None) -> EmbeddingBackend:
+def get_backend(force: str | None = None) -> EmbeddingBackend:
     """
     Return the best available backend. Priority:
       1. force override

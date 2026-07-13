@@ -96,7 +96,7 @@ def record_task_failure(
     task_id: str,
     error: str,
     agent_name: str,
-    details: Optional[Dict[str, Any]] = None,
+    details: dict[str, Any] | None = None,
 ):
     """Record task failure and create failure node + link"""
     # Update task node
@@ -166,7 +166,7 @@ def record_experience(
     summary: str,
     agent_name: str,
     success: bool = True,
-    related_failure_ids: Optional[List[str]] = None,
+    related_failure_ids: list[str] | None = None,
 ):
     """Record a distilled experience from a task"""
     exp_id = f"exp-{task_id}"
@@ -225,7 +225,7 @@ def find_similar_failures(
     error_text: str,
     max_results: int = 5,
     half_life_days: float = 30.0,
-) -> List[tuple[GraphNode, float]]:
+) -> list[tuple[GraphNode, float]]:
     """
     Find similar past failures by similarity (embedding/keyword) and recency.
 
@@ -277,7 +277,7 @@ def get_relevant_experiences(
     task_input: str,
     max_results: int = 3,
     half_life_days: float = 30.0,
-) -> List[str]:
+) -> list[str]:
     """
     Get relevant experience summaries for injecting into agent prompts.
 

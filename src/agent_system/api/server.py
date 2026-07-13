@@ -210,7 +210,7 @@ except Exception as _e:  # pragma: no cover — defensive only
 from agent_system.core.autogen_discussion import HAS_AUTOGEN as _HAS_AUTOGEN_CACHE  # noqa: E402
 
 # WebSocket registry (keyed by task_id, list of subscribers)
-_ws_connections: Dict[str, List[WebSocket]] = {}
+_ws_connections: dict[str, list[WebSocket]] = {}
 
 # In-flight task registry for graceful shutdown
 _in_flight_tasks: set = set()
@@ -244,21 +244,21 @@ class TaskRequest(BaseModel):
     input: str
     agent: str = "product"
     department_id: str = ""
-    task_id: Optional[str] = None
+    task_id: str | None = None
     # user_id and tenant_id are derived from the JWT, not the request body
 
 
 class TaskResponse(BaseModel):
     task_id: str
     status: str
-    output: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+    output: dict[str, Any] | None = None
+    error: str | None = None
 
 
 class AgentInfo(BaseModel):
     name: str
     description: str
-    capabilities: List[str]
+    capabilities: list[str]
 
 
 class HealthResponse(BaseModel):
@@ -272,7 +272,7 @@ class TokenRequest(BaseModel):
     user_id: str
     tenant_id: str = "default"
     role: str = "user"
-    ttl: Optional[int] = None
+    ttl: int | None = None
 
 
 class TokenResponse(BaseModel):
@@ -473,7 +473,7 @@ async def get_task(
 async def list_tasks(
     limit: int = Query(10, le=100),
     offset: int = Query(0, ge=0),
-    status: Optional[str] = None,
+    status: str | None = None,
     user: User = Depends(require_auth(_auth_service)),
 ):
     """List recent tasks (tenant-isolated)."""
@@ -497,7 +497,7 @@ async def list_tasks(
 
 # ── Agent endpoints ──
 
-@app.get("/api/agents", response_model=List[AgentInfo])
+@app.get("/api/agents", response_model=list[AgentInfo])
 async def list_agents(
     user: User = Depends(require_auth(_auth_service)),
 ):
@@ -602,12 +602,12 @@ async def metrics_prometheus_text():
 
 @app.get("/api/audit/query")
 async def query_audit(
-    user_id: Optional[str] = None,
-    action: Optional[str] = None,
-    outcome: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    request_id: Optional[str] = None,
+    user_id: str | None = None,
+    action: str | None = None,
+    outcome: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    request_id: str | None = None,
     limit: int = Query(default=100, le=1000),
     user: User = Depends(require_auth(_auth_service)),
 ):

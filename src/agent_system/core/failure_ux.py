@@ -136,11 +136,11 @@ class FriendlyError(BaseModel):
     title: str
     message: str
     category: ErrorCategory
-    suggestions: List[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
     can_retry: bool = True
     can_change_agent: bool = False
     error_code: str = ""
-    details: Dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def from_exception(cls, e: Exception, task_input: str = "") -> "FriendlyError":
@@ -182,10 +182,10 @@ class StepRecord(BaseModel):
     step_id: str
     name: str
     status: str = "pending"  # pending / running / completed / failed / skipped
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    output: Dict[str, Any] = Field(default_factory=dict)
-    error: Optional[str] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    output: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
 
 
 class TaskCheckpoint(BaseModel):
@@ -198,15 +198,15 @@ class TaskCheckpoint(BaseModel):
     task_id: str
     agent_name: str
     task_type: TaskType = TaskType.STANDARD
-    completed_steps: List[StepRecord] = Field(default_factory=list)
-    pending_steps: List[StepRecord] = Field(default_factory=list)
-    intermediate_outputs: Dict[str, Any] = Field(default_factory=dict)
-    error_history: List[Dict[str, Any]] = Field(default_factory=list)
+    completed_steps: list[StepRecord] = Field(default_factory=list)
+    pending_steps: list[StepRecord] = Field(default_factory=list)
+    intermediate_outputs: dict[str, Any] = Field(default_factory=dict)
+    error_history: list[dict[str, Any]] = Field(default_factory=list)
     started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     can_resume: bool = True
     timeout_seconds: int = 300
-    _deadline: Optional[float] = None
+    _deadline: float | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -236,7 +236,7 @@ class TaskCheckpoint(BaseModel):
             return 0.0
         return len(self.completed_steps) / total
 
-    def complete_step(self, step_id: str, output: Optional[Dict[str, Any]] = None):
+    def complete_step(self, step_id: str, output: dict[str, Any] | None = None):
         """Mark a step as completed"""
         for step in self.pending_steps:
             if step.step_id == step_id:
@@ -278,7 +278,7 @@ class TaskCheckpoint(BaseModel):
         })
         self.updated_at = datetime.now(timezone.utc)
 
-    def to_resume_context(self) -> Dict[str, Any]:
+    def to_resume_context(self) -> dict[str, Any]:
         """Generate context for resuming this task"""
         return {
             "task_id": self.task_id,
@@ -309,7 +309,7 @@ class CheckpointStore:
             logger.warning(f"Failed to save checkpoint {checkpoint.task_id}: {e}")
             return False
 
-    def load(self, task_id: str) -> Optional[TaskCheckpoint]:
+    def load(self, task_id: str) -> TaskCheckpoint | None:
         """Load checkpoint from disk"""
         import json
         path = self.store_dir / f"{task_id}.json"
@@ -331,7 +331,7 @@ class CheckpointStore:
             return True
         return False
 
-    def list_active(self) -> List[str]:
+    def list_active(self) -> list[str]:
         """List all active checkpoint task IDs"""
         if not self.store_dir.exists():
             return []
@@ -343,14 +343,14 @@ class CheckpointStore:
 class TimeoutMonitor:
     """Monitors tasks for timeout and triggers escalation"""
 
-    def __init__(self, event_bus: Optional[EventBus] = None):
-        self._checkpoints: Dict[str, TaskCheckpoint] = {}
+    def __init__(self, event_bus: EventBus | None = None):
+        self._checkpoints: dict[str, TaskCheckpoint] = {}
         self._event_bus = event_bus or global_bus
 
     def register(self, checkpoint: TaskCheckpoint):
         self._checkpoints[checkpoint.task_id] = checkpoint
 
-    def check_expired(self) -> List[str]:
+    def check_expired(self) -> list[str]:
         """Return list of expired task IDs"""
         expired = []
         for tid, cp in self._checkpoints.items():

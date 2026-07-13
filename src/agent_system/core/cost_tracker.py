@@ -64,8 +64,8 @@ class TaskCostSummary(BaseModel):
     total_output_tokens: int = 0
     total_cost: float = 0.0
     duration_seconds: float = 0.0
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
 
 class AnomalyAlert(BaseModel):
@@ -85,11 +85,11 @@ class CostTracker:
     Integrates with QuotaManager for enforcement.
     """
 
-    def __init__(self, quota_mgr: Optional[QuotaManager] = None):
+    def __init__(self, quota_mgr: QuotaManager | None = None):
         self.quota_mgr = quota_mgr or quota_manager
-        self._task_costs: Dict[str, TaskCostSummary] = {}
-        self._recent_calls: List[LLMCallRecord] = []
-        self._anomalies: List[AnomalyAlert] = []
+        self._task_costs: dict[str, TaskCostSummary] = {}
+        self._recent_calls: list[LLMCallRecord] = []
+        self._anomalies: list[AnomalyAlert] = []
         self._max_recent_calls: int = 1000
 
     def record_call(
@@ -153,7 +153,7 @@ class CostTracker:
 
         return record
 
-    def get_task_summary(self, task_id: str) -> Optional[TaskCostSummary]:
+    def get_task_summary(self, task_id: str) -> TaskCostSummary | None:
         return self._task_costs.get(task_id)
 
     def get_agent_costs(self, agent_name: str) -> float:
@@ -166,7 +166,7 @@ class CostTracker:
     def get_total_costs(self) -> float:
         return sum(s.total_cost for s in self._task_costs.values())
 
-    def get_recent_alerts(self, min_severity: str = "warning") -> List[AnomalyAlert]:
+    def get_recent_alerts(self, min_severity: str = "warning") -> list[AnomalyAlert]:
         return [a for a in self._anomalies
                 if {"info": 0, "warning": 1, "critical": 2}.get(a.severity, 0) >=
                    {"info": 0, "warning": 1, "critical": 2}.get(min_severity, 0)]
@@ -222,7 +222,7 @@ class CostTracker:
             if not self._should_suppress(alert):
                 self._anomalies.append(alert)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get overall cost statistics"""
         total = self.get_total_costs()
         call_count = len(self._recent_calls)

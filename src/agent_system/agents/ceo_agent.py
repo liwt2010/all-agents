@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class EscalationDecision(BaseModel):
     """CEO's decision on an escalation"""
     action: str  # handle / assign / change_rules / call_human
-    assigned_to: Optional[str] = None
+    assigned_to: str | None = None
     instructions: str = ""
     reason: str = ""
 
@@ -45,8 +45,8 @@ class CEOEscalationHandler:
         error: str,
         severity: str,
         analysis: str,
-        capabilities: List[str],
-        similar_experiences: List[Dict],
+        capabilities: list[str],
+        similar_experiences: list[dict],
     ) -> EscalationDecision:
         """Make a decision on an escalated task"""
         logger.info(f"CEO handling escalation: task={task_id} agent={agent_name} severity={severity}")
@@ -84,7 +84,7 @@ class CEOEscalationHandler:
             reason="CEO cannot resolve this automatically",
         )
 
-    def _can_handle_directly(self, error: str, capabilities: List[str]) -> bool:
+    def _can_handle_directly(self, error: str, capabilities: list[str]) -> bool:
         """CEO tries to determine if it can provide direct guidance"""
         resolvable_patterns = [
             "resource constraint", "quota", "limit",
@@ -94,7 +94,7 @@ class CEOEscalationHandler:
         error_lower = error.lower()
         return any(p in error_lower for p in resolvable_patterns)
 
-    def _find_expert(self, error: str, excluded_capabilities: List[str]) -> Optional[str]:
+    def _find_expert(self, error: str, excluded_capabilities: list[str]) -> str | None:
         """Find the best expert agent for this problem"""
         error_lower = error.lower()
 
@@ -272,7 +272,7 @@ class CEOAgent(SmartAgent):
 
         return self._pipeline_result(task, steps)
 
-    def _pipeline_result(self, task: TaskContext, steps: list, error: Optional[str] = None) -> OutputSchema:
+    def _pipeline_result(self, task: TaskContext, steps: list, error: str | None = None) -> OutputSchema:
         return OutputSchema(
             id=OutputSchema.generate_id("pipeline"),
             type="pipeline_result",

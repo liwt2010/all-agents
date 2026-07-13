@@ -43,7 +43,7 @@ class ComponentInfo(BaseModel):
     file_count: int = 0
     total_bytes: int = 0
     sha256: str = ""
-    extra: Dict[str, Any] = Field(default_factory=dict)
+    extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class BackupManifest(BaseModel):
@@ -52,7 +52,7 @@ class BackupManifest(BaseModel):
     created_at: str                    # ISO 8601 UTC
     version: str = "0.1.0"
     backend: str                       # json | sqlite | postgres
-    components: Dict[str, ComponentInfo] = Field(default_factory=dict)
+    components: dict[str, ComponentInfo] = Field(default_factory=dict)
     compression: str = "gzip"
     size_bytes: int = 0
     duration_seconds: float = 0.0

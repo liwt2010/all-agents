@@ -42,7 +42,7 @@ class GroupIsolationMixin:
             return ctx.user.tenant_id
         return self.default_tenant_id
 
-    def _current_group_ids(self) -> List[str]:
+    def _current_group_ids(self) -> list[str]:
         """Get the group ids the current user belongs to."""
         ctx = get_current_tenant()
         if ctx and ctx.user:
@@ -137,7 +137,7 @@ class GroupIsolationMixin:
 
     # ── Resource tagging helpers ──
 
-    def tag_for_tenant(self, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tag_for_tenant(self, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         """Build a metadata dict tagged with current tenant/group/user."""
         md = dict(metadata or {})
         md.setdefault("tenant_id", self._current_tenant_id())

@@ -34,11 +34,11 @@ class AgentRegistry:
     """Runtime registry of agent classes + their default instances."""
 
     def __init__(self):
-        self._classes: Dict[str, Type] = {}     # name -> agent class
-        self._instances: Dict[str, Any] = {}   # name -> lazily-instantiated default instance
+        self._classes: dict[str, type] = {}     # name -> agent class
+        self._instances: dict[str, Any] = {}   # name -> lazily-instantiated default instance
         self._indexed: bool = False             # whether _classes is keyed by canonical agent_name
 
-    def register(self, agent_cls: Type) -> Type:
+    def register(self, agent_cls: type) -> type:
         """Register an agent class. Idempotent on (class identity).
 
         Note: @register_agent decorator runs BEFORE the class body executes, so
@@ -56,7 +56,7 @@ class AgentRegistry:
         logger.debug(f"Registered (provisional): {provisional_key} → {agent_cls.__name__}")
         return agent_cls
 
-    def _resolve_name(self, agent_cls: Type) -> Optional[str]:
+    def _resolve_name(self, agent_cls: type) -> str | None:
         """Get the canonical agent_name from a registered class, or None if absent.
 
         Handles both regular Python classes (attribute on class) and Pydantic
@@ -86,7 +86,7 @@ class AgentRegistry:
         """Re-index by canonical agent_name once all classes have run their bodies.
         Called automatically from get_instance / all_names / count."""
         if not hasattr(self, "_indexed") or not self._indexed:
-            new_classes: Dict[str, Type] = {}
+            new_classes: dict[str, type] = {}
             for cls in self._classes.values():
                 name = self._resolve_name(cls)
                 if name is None:
@@ -100,11 +100,11 @@ class AgentRegistry:
             self._classes = new_classes
             self._indexed = True
 
-    def get_class(self, name: str) -> Optional[Type]:
+    def get_class(self, name: str) -> type | None:
         self._rebuild_index()
         return self._classes.get(name)
 
-    def get_instance(self, name: str) -> Optional[Any]:
+    def get_instance(self, name: str) -> Any | None:
         """Get or lazily create the default instance for `name`."""
         self._rebuild_index()
         if name not in self._instances:
@@ -118,23 +118,23 @@ class AgentRegistry:
                 return None
         return self._instances.get(name)
 
-    def all_classes(self) -> List[Type]:
+    def all_classes(self) -> list[type]:
         self._rebuild_index()
         return list(self._classes.values())
 
-    def all_names(self) -> List[str]:
+    def all_names(self) -> list[str]:
         self._rebuild_index()
         return list(self._classes.keys())
 
-    def all_instances(self) -> List[Any]:
+    def all_instances(self) -> list[Any]:
         return [self.get_instance(n) for n in self._classes if self.get_instance(n) is not None]
 
-    def names_excluding(self, excluded: str) -> List[str]:
+    def names_excluding(self, excluded: str) -> list[str]:
         """Return all registered names except `excluded` (the self-agent)."""
         self._rebuild_index()
         return [n for n in self._classes if n != excluded]
 
-    def instances_excluding(self, excluded: str) -> List[Any]:
+    def instances_excluding(self, excluded: str) -> list[Any]:
         """Return instances of all agents except `excluded`, preserving registration order."""
         self._rebuild_index()
         result = []
@@ -161,7 +161,7 @@ class AgentRegistry:
 agent_registry = AgentRegistry()
 
 
-def register_agent(cls: Type) -> Type:
+def register_agent(cls: type) -> type:
     """Decorator: register an agent class with the global AgentRegistry.
 
     Usage:
@@ -174,7 +174,7 @@ def register_agent(cls: Type) -> Type:
     return cls
 
 
-def discover_agents(agents_dir: Optional[str] = None) -> AgentRegistry:
+def discover_agents(agents_dir: str | None = None) -> AgentRegistry:
     """Scan a directory for `*_agent.py` modules and import them, triggering @register_agent.
 
     Called by `agent_system.agents.__init__`. Safe to call multiple times — registration

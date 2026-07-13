@@ -34,7 +34,7 @@ class RedisResourceLock:
 
     def __init__(self, redis_url: str = "redis://localhost:6379/0",
                  default_ttl: int = 300,
-                 fallback: Optional[ResourceLock] = None):
+                 fallback: ResourceLock | None = None):
         self.default_ttl = default_ttl
         self._fallback = fallback or ResourceLock(default_ttl)
         self._client = None
@@ -59,8 +59,8 @@ class RedisResourceLock:
         self,
         resource: str,
         holder: str,
-        ttl: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        ttl: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> bool:
         client = await self._ensure_client()
         if client is None:
@@ -95,7 +95,7 @@ class RedisResourceLock:
         self,
         resource: str,
         holder: str,
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
     ) -> bool:
         client = await self._ensure_client()
         if client is None:
@@ -111,7 +111,7 @@ class RedisResourceLock:
             return await self._fallback.is_locked(resource)
         return bool(await client.exists(f"lock:{resource}"))
 
-    async def get_holder(self, resource: str) -> Optional[str]:
+    async def get_holder(self, resource: str) -> str | None:
         client = await self._ensure_client()
         if client is None:
             return await self._fallback.get_holder(resource)
@@ -122,7 +122,7 @@ class RedisResourceLock:
         self,
         resource: str,
         holder: str,
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
     ):
         acquired = await self.acquire(resource, holder, ttl=ttl)
         if not acquired:
@@ -133,7 +133,7 @@ class RedisResourceLock:
         finally:
             await self.release(resource, holder)
 
-    async def stats(self) -> Dict[str, Any]:
+    async def stats(self) -> dict[str, Any]:
         client = await self._ensure_client()
         if client is None:
             return await self._fallback.stats()
@@ -222,7 +222,7 @@ class RedisQuotaStore:
 # ── Factory ──
 
 def create_redis_lock(
-    redis_url: Optional[str] = None,
+    redis_url: str | None = None,
     default_ttl: int = 300,
 ) -> RedisResourceLock:
     """Factory: returns RedisResourceLock with in-memory fallback."""

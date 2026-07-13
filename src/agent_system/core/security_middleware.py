@@ -28,10 +28,10 @@ logger = logging.getLogger(__name__)
 
 # Context var so downstream code (logging, audit, events) can attach the same request_id
 # without threading it through every function signature.
-_request_id_var: ContextVar[Optional[str]] = ContextVar("_request_id_var", default=None)
+_request_id_var: ContextVar[str | None] = ContextVar("_request_id_var", default=None)
 
 
-def get_request_id() -> Optional[str]:
+def get_request_id() -> str | None:
     """Return the current request's ID, or None outside a request context."""
     return _request_id_var.get()
 
@@ -68,11 +68,11 @@ class RateLimiter:
     Default: 60 requests / 60 seconds per IP.
     """
 
-    def __init__(self, rate: int = 60, window: int = 60, burst: Optional[int] = None):
+    def __init__(self, rate: int = 60, window: int = 60, burst: int | None = None):
         self.rate = float(rate)
         self.window = float(window)
         self.burst = float(burst) if burst else float(rate)
-        self._buckets: Dict[str, _Bucket] = defaultdict(
+        self._buckets: dict[str, _Bucket] = defaultdict(
             lambda: _Bucket(tokens=self.burst, last_refill=time.time())
         )
         self._cleanup_interval = 300.0
@@ -108,7 +108,7 @@ class RateLimiter:
             return True
         return False
 
-    def reset(self, ip: Optional[str] = None) -> None:
+    def reset(self, ip: str | None = None) -> None:
         if ip:
             self._buckets.pop(ip, None)
         else:
@@ -179,7 +179,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Per-IP rate limiting using a token bucket."""
 
-    def __init__(self, app, rate_per_minute: int = 60, exempt_paths: Optional[list] = None):
+    def __init__(self, app, rate_per_minute: int = 60, exempt_paths: list | None = None):
         super().__init__(app)
         self.limiter = RateLimiter(rate=rate_per_minute, window=60)
         self.exempt_paths = set(exempt_paths or ["/api/health", "/api/ready"])
@@ -238,7 +238,7 @@ class SecretsInRequestMiddleware:
     and replay it for downstream handlers without losing data.
     """
 
-    def __init__(self, app, exempt_paths: Optional[list] = None):
+    def __init__(self, app, exempt_paths: list | None = None):
         self.app = app
         self.exempt_paths = set(exempt_paths or ["/api/health", "/api/ready"])
 
@@ -314,7 +314,7 @@ def _passthrough_receive(body: bytes):
 
 # ── Generic exception handler ──
 
-def mask_internal_error(exc: Exception) -> Dict[str, Any]:
+def mask_internal_error(exc: Exception) -> dict[str, Any]:
     """
     Return a safe error response body. Never leak stack traces,
     SQL fragments, or file paths.
@@ -332,7 +332,7 @@ _REQUEST_ID_MAX_LEN = 128
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9_\-]+$")
 
 
-def _sanitize_request_id(value: Optional[str]) -> Optional[str]:
+def _sanitize_request_id(value: str | None) -> str | None:
     """Validate an incoming X-Request-ID. Reject anything not [A-Za-z0-9_-]{<=128}."""
     if value is None:
         return None
@@ -407,7 +407,7 @@ class SlidingWindowRateLimitMiddleware(BaseHTTPMiddleware):
         app,
         enabled: bool = True,
         fail_mode: str = "open",
-        exempt_paths: Optional[list] = None,
+        exempt_paths: list | None = None,
     ):
         super().__init__(app)
         self.enabled = enabled

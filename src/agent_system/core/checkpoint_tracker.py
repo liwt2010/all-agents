@@ -23,12 +23,12 @@ class LiveProgress(BaseModel):
     progress: float = 0.0     # 0.0 to 1.0
     current_step: str = ""
     current_step_id: str = ""
-    completed_steps: List[str] = Field(default_factory=list)
-    pending_steps: List[str] = Field(default_factory=list)
-    error: Optional[str] = None
-    started_at: Optional[datetime] = None
+    completed_steps: list[str] = Field(default_factory=list)
+    pending_steps: list[str] = Field(default_factory=list)
+    error: str | None = None
+    started_at: datetime | None = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    output: Optional[Dict[str, Any]] = None
+    output: dict[str, Any] | None = None
     retry_count: int = 0
     tenant_id: str = "default"
 
@@ -41,13 +41,13 @@ class CheckpointTracker:
     hot in-memory map so the API can serve real-time progress.
     """
 
-    def __init__(self, store: Optional[CheckpointStore] = None):
+    def __init__(self, store: CheckpointStore | None = None):
         self.store = store or CheckpointStore()
-        self._live: Dict[str, TaskCheckpoint] = {}
+        self._live: dict[str, TaskCheckpoint] = {}
 
     # ── Lifecycle ──
 
-    _tenant_map: Dict[str, str] = {}  # task_id -> tenant_id
+    _tenant_map: dict[str, str] = {}  # task_id -> tenant_id
 
     def start(self, task_id: str, agent_name: str, task_input: str = "",
               tenant_id: str = "default") -> TaskCheckpoint:
@@ -71,7 +71,7 @@ class CheckpointTracker:
         self.store.save(cp)
         return cp
 
-    def complete_step(self, task_id: str, step_id: str, output: Optional[Dict[str, Any]] = None):
+    def complete_step(self, task_id: str, step_id: str, output: dict[str, Any] | None = None):
         """Mark a step as completed (and update output)."""
         cp = self._live.get(task_id)
         if not cp:
@@ -104,7 +104,7 @@ class CheckpointTracker:
         cp.updated_at = datetime.now(timezone.utc)
         self.store.save(cp)
 
-    def finish(self, task_id: str, success: bool = True, output: Optional[Dict[str, Any]] = None):
+    def finish(self, task_id: str, success: bool = True, output: dict[str, Any] | None = None):
         """Mark the entire task as complete. Removes from hot map, persists result."""
         cp = self._live.get(task_id)
         if cp:
@@ -116,7 +116,7 @@ class CheckpointTracker:
             # return final status to the next poll, then evict
         self._live.pop(task_id, None)
 
-    def get_live(self, task_id: str) -> Optional[LiveProgress]:
+    def get_live(self, task_id: str) -> LiveProgress | None:
         """Get current progress for a task (live or recently completed)."""
         cp = self._live.get(task_id)
         if cp:
@@ -138,7 +138,7 @@ class CheckpointTracker:
             return self._to_progress(persisted, status=status)
         return None
 
-    def list_active(self) -> List[str]:
+    def list_active(self) -> list[str]:
         return list(self._live.keys())
 
     # ── Helpers ──

@@ -35,9 +35,9 @@ class CustomAgentRegistry:
     Storage layout: <storage_path>/<tenant_id>/<id>.json
     """
 
-    def __init__(self, storage_path: Optional[str] = None):
+    def __init__(self, storage_path: str | None = None):
         self.storage_path = Path(storage_path) if storage_path else Path(tempfile.gettempdir()) / "agent_custom_agents"
-        self._configs: Dict[str, CustomAgentConfig] = {}  # key = f"{tenant_id}:{id}"
+        self._configs: dict[str, CustomAgentConfig] = {}  # key = f"{tenant_id}:{id}"
         self._load_from_disk()
 
     @staticmethod
@@ -85,11 +85,11 @@ class CustomAgentRegistry:
         self._save_to_disk(config)
         logger.info(f"Registered custom agent: {tenant_id}/{config.id}")
 
-    def get(self, agent_id: str, tenant_id: str = "default") -> Optional[CustomAgentConfig]:
+    def get(self, agent_id: str, tenant_id: str = "default") -> CustomAgentConfig | None:
         """Load by (tenant_id, id). Returns None if not found."""
         return self._configs.get(self._key(tenant_id, agent_id))
 
-    def list(self, tenant_id: str = "default") -> List[CustomAgentConfig]:
+    def list(self, tenant_id: str = "default") -> list[CustomAgentConfig]:
         """List all configs for a tenant."""
         return [
             c for k, c in self._configs.items()
@@ -107,7 +107,7 @@ class CustomAgentRegistry:
             path.unlink()
         return True
 
-    def instantiate(self, agent_id: str, tenant_id: str = "default") -> Optional[CustomAgent]:
+    def instantiate(self, agent_id: str, tenant_id: str = "default") -> CustomAgent | None:
         """Get config + create CustomAgent runtime instance. Returns None if not found."""
         config = self.get(agent_id, tenant_id)
         if config is None:
@@ -117,7 +117,7 @@ class CustomAgentRegistry:
 
 # ── Singleton ──
 
-_custom_registry: Optional[CustomAgentRegistry] = None
+_custom_registry: CustomAgentRegistry | None = None
 
 
 def get_custom_agent_registry() -> CustomAgentRegistry:

@@ -26,31 +26,31 @@ class _UserStub(BaseModel):
     """Minimal user shape for context. Full User model is in task #82."""
     user_id: str
     tenant_id: str = "default"
-    group_ids: List[str] = Field(default_factory=list)
-    perm_group_ids: List[str] = Field(default_factory=list)
-    project_ids: List[str] = Field(default_factory=list)
+    group_ids: list[str] = Field(default_factory=list)
+    perm_group_ids: list[str] = Field(default_factory=list)
+    project_ids: list[str] = Field(default_factory=list)
     global_role: str = "user"
     is_agent: bool = False
 
 
 class TenantContext(BaseModel):
     """The active tenant context for the current async task."""
-    user: Optional[_UserStub] = None
+    user: _UserStub | None = None
     tenant_id: str = "default"
-    group_ids: List[str] = Field(default_factory=list)
+    group_ids: list[str] = Field(default_factory=list)
     request_id: str = ""
 
 
 # ContextVar for async-safe access
-_tenant_ctx: ContextVar[Optional[TenantContext]] = ContextVar("tenant_ctx", default=None)
+_tenant_ctx: ContextVar[TenantContext | None] = ContextVar("tenant_ctx", default=None)
 
 
-def get_current_tenant() -> Optional[TenantContext]:
+def get_current_tenant() -> TenantContext | None:
     """Return the current TenantContext (or None if not set)."""
     return _tenant_ctx.get()
 
 
-def set_tenant_context(ctx: Optional[TenantContext]) -> object:
+def set_tenant_context(ctx: TenantContext | None) -> object:
     """
     Set the current tenant context. Returns a token to reset it.
 

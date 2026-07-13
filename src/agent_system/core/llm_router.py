@@ -114,7 +114,7 @@ class ToolExecutor:
     def __init__(self, tool_registry: Any):
         self.registry = tool_registry
 
-    async def execute(self, name: str, inputs: Dict[str, Any]) -> Tuple[str, bool]:
+    async def execute(self, name: str, inputs: dict[str, Any]) -> tuple[str, bool]:
         """
         Execute a tool by name. Returns (output_text, is_error).
         """
@@ -152,7 +152,7 @@ class LLMRouter:
         self.default_max_retries = default_max_retries
         self._anthropic_client = None  # lazy-init
         self._openai_client = None     # lazy-init
-        self._mock_mode: Optional[bool] = None
+        self._mock_mode: bool | None = None
 
     @property
     def llm_provider(self) -> str:
@@ -171,7 +171,7 @@ class LLMRouter:
         """Get the OpenAI-compatible base URL."""
         return os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com").strip()
 
-    def get_config(self, agent_name: str, task_complexity: Optional[str] = None) -> LLMConfig:
+    def get_config(self, agent_name: str, task_complexity: str | None = None) -> LLMConfig:
         """Get LLM config for an agent, optionally adjusting for task complexity"""
         config = self.settings.get_llm_config(agent_name)
         if task_complexity == "simple":
@@ -266,7 +266,7 @@ class LLMRouter:
         messages: list,
         model: str,
         reserve_output_tokens: int = 4096,
-    ) -> Tuple[str, list]:
+    ) -> tuple[str, list]:
         """Truncate system prompt + messages if they exceed the model's context window."""
         limit = get_model_limit(model)
         available = limit - reserve_output_tokens
@@ -297,12 +297,12 @@ class LLMRouter:
         config: LLMConfig,
         system_prompt: str,
         messages: list,
-        tools: Optional[list] = None,
-        tool_executor: Optional[ToolExecutor] = None,
+        tools: list | None = None,
+        tool_executor: ToolExecutor | None = None,
         max_tool_turns: int = 5,
-        _agent_name: Optional[str] = None,
-        _task_id: Optional[str] = None,
-    ) -> Tuple[str, LLMUsage]:
+        _agent_name: str | None = None,
+        _task_id: str | None = None,
+    ) -> tuple[str, LLMUsage]:
         """
         Call the LLM and return (response_text, usage).
 
@@ -383,10 +383,10 @@ class LLMRouter:
         config: LLMConfig,
         system_prompt: str,
         messages: list,
-        tools: Optional[list],
-    ) -> Tuple[str, LLMUsage, list]:
+        tools: list | None,
+    ) -> tuple[str, LLMUsage, list]:
         """Make one LLM call with retry on transient errors."""
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
         retries = 0
         for attempt in range(self.default_max_retries + 1):
             try:
@@ -416,8 +416,8 @@ class LLMRouter:
         config: LLMConfig,
         system_prompt: str,
         messages: list,
-        tools: Optional[list],
-    ) -> Tuple[str, LLMUsage, list]:
+        tools: list | None,
+    ) -> tuple[str, LLMUsage, list]:
         """Make one raw LLM call. Returns (text, usage, raw_content_blocks)."""
         start = time.time()
         kwargs = {
@@ -496,10 +496,10 @@ class LLMRouter:
         config: LLMConfig,
         system_prompt: str,
         messages: list,
-        tools: Optional[list],
-        tool_executor: Optional[ToolExecutor],
+        tools: list | None,
+        tool_executor: ToolExecutor | None,
         max_tool_turns: int,
-    ) -> Tuple[str, LLMUsage]:
+    ) -> tuple[str, LLMUsage]:
         """Call an OpenAI-compatible API (DeepSeek, etc.) with optional tool use."""
         client = self.get_openai_client()
         if not client:
@@ -639,7 +639,7 @@ class LLMRouter:
 
     # ── Mock mode ──
 
-    def _mock_response(self, system_prompt: str, messages: list) -> Tuple[str, LLMUsage]:
+    def _mock_response(self, system_prompt: str, messages: list) -> tuple[str, LLMUsage]:
         """Deterministic mock response for dev/test."""
         last_msg = ""
         for m in reversed(messages):

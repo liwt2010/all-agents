@@ -31,7 +31,7 @@ SENSITIVE_PATTERNS = [
 DEFAULT_ALLOWED_ROOTS = ["data", "tmp", "."]
 
 
-def _resolve_and_validate(path_str: str, allowed_roots: List[str], allow_write: bool) -> Path:
+def _resolve_and_validate(path_str: str, allowed_roots: list[str], allow_write: bool) -> Path:
     """
     Resolve a path string and verify it falls under an allowed root.
 
@@ -70,7 +70,7 @@ def _resolve_and_validate(path_str: str, allowed_roots: List[str], allow_write: 
     return absolute
 
 
-def _match_sensitive(absolute: Path) -> Optional[str]:
+def _match_sensitive(absolute: Path) -> str | None:
     """Check if path matches any sensitive pattern. Returns matched name or None."""
     for pat in SENSITIVE_PATTERNS:
         # Try matching against each path component
@@ -104,7 +104,7 @@ class ReadFileTool(Tool):
         "required": ["path"],
     }
 
-    async def execute(self, inputs: Dict[str, Any]) -> ToolResult:
+    async def execute(self, inputs: dict[str, Any]) -> ToolResult:
         try:
             path_str = inputs["path"]
             roots = _get_allowed_roots()
@@ -140,7 +140,7 @@ class WriteFileTool(Tool):
         "required": ["path", "content"],
     }
 
-    async def execute(self, inputs: Dict[str, Any]) -> ToolResult:
+    async def execute(self, inputs: dict[str, Any]) -> ToolResult:
         try:
             path_str = inputs["path"]
             content = inputs["content"]
@@ -168,7 +168,7 @@ class ListFilesTool(Tool):
         "required": ["path"],
     }
 
-    async def execute(self, inputs: Dict[str, Any]) -> ToolResult:
+    async def execute(self, inputs: dict[str, Any]) -> ToolResult:
         try:
             path_str = inputs["path"]
             pattern = inputs.get("pattern", "*")
@@ -187,7 +187,7 @@ class ListFilesTool(Tool):
             return ToolResult(success=False, error=str(e))
 
 
-def _get_allowed_roots() -> List[str]:
+def _get_allowed_roots() -> list[str]:
     """Read ALLOWED_FILE_ROOTS from env (comma-separated). Default = data/tmp/cwd."""
     env = os.environ.get("ALLOWED_FILE_ROOTS")
     if env:

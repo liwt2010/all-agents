@@ -50,9 +50,9 @@ class QueryError(Exception):
     line: int
     column: int
     message: str
-    hint: Optional[str] = None
+    hint: str | None = None
 
-    def __init__(self, message: str, line: int = 0, column: int = 0, hint: Optional[str] = None):
+    def __init__(self, message: str, line: int = 0, column: int = 0, hint: str | None = None):
         super().__init__(f"[line {line}, col {column}] {message}" + (f" (hint: {hint})" if hint else ""))
         self.line = line
         self.column = column
@@ -66,15 +66,15 @@ class QueryError(Exception):
 class QueryRequest(BaseModel):
     """Input: SQL + graph + optional current node for STEPS FROM"""
     sql: str
-    graph: Optional[Any] = None  # MultiLinkGraph; injected by query() to avoid Pydantic generics
-    current_node: Optional[str] = None
+    graph: Any | None = None  # MultiLinkGraph; injected by query() to avoid Pydantic generics
+    current_node: str | None = None
 
 
 class QueryResult(BaseModel):
     """Output of a Dataview query"""
-    rows: List[Dict[str, Any]] = Field(default_factory=list)
-    columns: List[str] = Field(default_factory=list)
-    aggregations: Dict[str, float] = Field(default_factory=dict)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    columns: list[str] = Field(default_factory=list)
+    aggregations: dict[str, float] = Field(default_factory=dict)
     steps_executed: int = 0
     duration_ms: float = 0.0
     row_count: int = 0
@@ -160,9 +160,9 @@ _TOKEN_REGEX = re.compile(
 )
 
 
-def tokenize(sql: str) -> List[Token]:
+def tokenize(sql: str) -> list[Token]:
     """Lex SQL string into tokens. Raises QueryError on lex failure."""
-    tokens: List[Token] = []
+    tokens: list[Token] = []
     pos = 0
     line = 1
     col = 1
@@ -225,7 +225,7 @@ class AggExpr:
     """Aggregate expression: COUNT/AVG/SUM/MIN/MAX"""
     agg: str            # COUNT/AVG/SUM/MIN/MAX
     field: FieldRef     # field or * for COUNT(*)
-    alias: Optional[str] = None
+    alias: str | None = None
     filter: Optional["Condition"] = None  # FILTER (WHERE ...)
     line: int = 0
     column: int = 0
@@ -235,7 +235,7 @@ class AggExpr:
 class FieldExpr:
     """Plain field selection"""
     field: FieldRef
-    alias: Optional[str] = None
+    alias: str | None = None
     line: int = 0
     column: int = 0
 
@@ -295,18 +295,18 @@ class LimitClause:
 
 @dataclass
 class SelectStmt:
-    select_exprs: List[Union[FieldExpr, AggExpr]]
+    select_exprs: list[Union[FieldExpr, AggExpr]]
     from_clause: FromClause
-    where: Optional[Condition] = None
-    order: Optional[OrderClause] = None
-    limit: Optional[LimitClause] = None
+    where: Condition | None = None
+    order: OrderClause | None = None
+    limit: LimitClause | None = None
     is_aggregation_only: bool = False  # True if all select_exprs are AggExpr
 
 
 # ─── Parser (recursive descent) ──────────────────────────────────
 
 class Parser:
-    def __init__(self, tokens: List[Token]):
+    def __init__(self, tokens: list[Token]):
         self.tokens = tokens
         self.pos = 0
 
@@ -319,7 +319,7 @@ class Parser:
             self.pos += 1
         return tok
 
-    def expect(self, type: TokenType, hint: Optional[str] = None) -> Token:
+    def expect(self, type: TokenType, hint: str | None = None) -> Token:
         tok = self.peek()
         if tok.type != type:
             raise QueryError(
@@ -369,7 +369,7 @@ class Parser:
             is_aggregation_only=is_agg,
         )
 
-    def _parse_select_exprs(self) -> List[Union[FieldExpr, AggExpr]]:
+    def _parse_select_exprs(self) -> list[Union[FieldExpr, AggExpr]]:
         exprs = [self._parse_select_expr()]
         while self.peek().type == TokenType.COMMA:
             self.advance()
@@ -621,7 +621,7 @@ def _agg_key(expr: AggExpr) -> str:
     return f"{expr.agg.lower()}_{expr.field.name}"
 
 
-def _node_matches_condition(node: GraphNode, cond: Condition, graph: MultiLinkGraph, current_node: Optional[str]) -> bool:
+def _node_matches_condition(node: GraphNode, cond: Condition, graph: MultiLinkGraph, current_node: str | None) -> bool:
     if isinstance(cond, Comparison):
         actual = _resolve_field(node, cond.field)
         return _compare(actual, cond.op, cond.value)
@@ -703,7 +703,7 @@ def _parse_node_type(type_str: str) -> NodeType:
     )
 
 
-def execute_query(stmt: SelectStmt, graph: MultiLinkGraph, current_node: Optional[str] = None) -> QueryResult:
+def execute_query(stmt: SelectStmt, graph: MultiLinkGraph, current_node: str | None = None) -> QueryResult:
     """Execute a parsed SelectStmt against a MultiLinkGraph."""
     start = time.perf_counter()
     steps_executed = 0
@@ -722,8 +722,8 @@ def execute_query(stmt: SelectStmt, graph: MultiLinkGraph, current_node: Optiona
         steps_executed += 1
 
     # 3. SELECT: build rows or aggregations
-    rows: List[Dict[str, Any]] = []
-    aggregations: Dict[str, float] = {}
+    rows: list[dict[str, Any]] = []
+    aggregations: dict[str, float] = {}
 
     if stmt.is_aggregation_only:
         # Compute aggregates
@@ -735,7 +735,7 @@ def execute_query(stmt: SelectStmt, graph: MultiLinkGraph, current_node: Optiona
             steps_executed += 1
     else:
         for node in candidates:
-            row: Dict[str, Any] = {}
+            row: dict[str, Any] = {}
             for expr in stmt.select_exprs:
                 if isinstance(expr, FieldExpr):
                     val = _resolve_field(node, expr.field)
@@ -766,7 +766,7 @@ def execute_query(stmt: SelectStmt, graph: MultiLinkGraph, current_node: Optiona
     duration_ms = round((time.perf_counter() - start) * 1000, 3)
 
     # Build columns from select_exprs
-    columns: List[str] = []
+    columns: list[str] = []
     for expr in stmt.select_exprs:
         if isinstance(expr, FieldExpr):
             columns.append(expr.alias or _display_field_name(expr.field))
@@ -783,7 +783,7 @@ def execute_query(stmt: SelectStmt, graph: MultiLinkGraph, current_node: Optiona
     )
 
 
-def _compute_agg(expr: AggExpr, nodes: List[GraphNode], graph: MultiLinkGraph, current_node: Optional[str]) -> float:
+def _compute_agg(expr: AggExpr, nodes: list[GraphNode], graph: MultiLinkGraph, current_node: str | None) -> float:
     """Compute an aggregate value. FILTER narrows the input set."""
     filtered = nodes
     if expr.filter is not None:
@@ -798,7 +798,7 @@ def _compute_agg(expr: AggExpr, nodes: List[GraphNode], graph: MultiLinkGraph, c
     if expr.field.name == "*":
         raise QueryError(f"{expr.agg}(*) not supported; specify a numeric field")
 
-    values: List[float] = []
+    values: list[float] = []
     for n in filtered:
         v = _resolve_field(n, expr.field)
         if v is None:
@@ -824,7 +824,7 @@ def _compute_agg(expr: AggExpr, nodes: List[GraphNode], graph: MultiLinkGraph, c
 
 # ─── Top-level API ────────────────────────────────────────────────
 
-def query(sql: str, graph: Optional[MultiLinkGraph] = None, current_node: Optional[str] = None) -> QueryResult:
+def query(sql: str, graph: MultiLinkGraph | None = None, current_node: str | None = None) -> QueryResult:
     """
     Parse and execute a Dataview SQL query.
 
@@ -855,11 +855,11 @@ class Query:
 
     def __init__(self, graph: MultiLinkGraph):
         self._graph = graph
-        self._from: Optional[str] = None
-        self._where_clauses: List[str] = []
-        self._select_parts: List[str] = []
-        self._order: Optional[Tuple[str, bool]] = None
-        self._limit: Optional[int] = None
+        self._from: str | None = None
+        self._where_clauses: list[str] = []
+        self._select_parts: list[str] = []
+        self._order: tuple[str, bool] | None = None
+        self._limit: int | None = None
 
     def from_(self, node_type: str) -> "Query":
         self._from = node_type
@@ -881,11 +881,11 @@ class Query:
         self._select_parts.append(f"COUNT({field}) AS {alias}")
         return self
 
-    def avg(self, field: str, alias: Optional[str] = None) -> "Query":
+    def avg(self, field: str, alias: str | None = None) -> "Query":
         self._select_parts.append(f"AVG({field})" + (f" AS {alias}" if alias else ""))
         return self
 
-    def sum(self, field: str, alias: Optional[str] = None) -> "Query":
+    def sum(self, field: str, alias: str | None = None) -> "Query":
         self._select_parts.append(f"SUM({field})" + (f" AS {alias}" if alias else ""))
         return self
 

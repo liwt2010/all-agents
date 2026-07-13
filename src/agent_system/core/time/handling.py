@@ -96,10 +96,10 @@ class HolidayCalendar:
     holidays; pluggable via the holidays list.
     """
 
-    def __init__(self, holidays: Optional[List[date]] = None):
+    def __init__(self, holidays: list[date] | None = None):
         self.holidays = set(holidays or self._default_holidays())
 
-    def _default_holidays(self) -> List[date]:
+    def _default_holidays(self) -> list[date]:
         """A tiny default list. Production should load from DB / API."""
         return [
             # 2026 holidays (placeholder; real system should pull from a source)
@@ -153,14 +153,14 @@ class WorkingHours:
         tz_handler: TimezoneHandler,
         work_start: time = time(9, 0),
         work_end: time = time(18, 0),
-        calendar: Optional[HolidayCalendar] = None,
+        calendar: HolidayCalendar | None = None,
     ):
         self.tz = tz_handler
         self.work_start = work_start
         self.work_end = work_end
         self.calendar = calendar or HolidayCalendar()
 
-    def is_working_time(self, when: Optional[datetime] = None) -> bool:
+    def is_working_time(self, when: datetime | None = None) -> bool:
         """Check if `when` is within work hours (in the configured timezone)."""
         when = when or self.tz.now_local()
         local = self.tz.to_local(when) if when.tzinfo else when
@@ -170,7 +170,7 @@ class WorkingHours:
 
     def should_notify_now(
         self,
-        when: Optional[datetime] = None,
+        when: datetime | None = None,
         urgency: WorkUrgency = WorkUrgency.NORMAL,
     ) -> bool:
         """Decide whether to deliver a notification right now."""
@@ -180,7 +180,7 @@ class WorkingHours:
 
     def next_working_moment(
         self,
-        after: Optional[datetime] = None,
+        after: datetime | None = None,
     ) -> datetime:
         """
         Return the next working moment after `after`.
@@ -222,9 +222,9 @@ def get_timeout_for(task_type: str) -> int:
 
 
 def is_within_work_hours(
-    when: Optional[datetime] = None,
+    when: datetime | None = None,
     tz_name: str = "UTC",
-    calendar: Optional[HolidayCalendar] = None,
+    calendar: HolidayCalendar | None = None,
     work_start: time = time(9, 0),
     work_end: time = time(18, 0),
 ) -> bool:

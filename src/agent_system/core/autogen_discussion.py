@@ -150,7 +150,7 @@ class AutoGenGroupChat:
             logger.exception(f"AutoGen discussion failed: {e}")
             return self._no_autogen_result(task, error)
 
-    def _collect_peers(self, exclude: str) -> List[Tuple[str, type]]:
+    def _collect_peers(self, exclude: str) -> list[tuple[str, type]]:
         """Collect peer agent classes, excluding the asker."""
         # Import here to avoid circular imports at module level
         from agent_system.agents.product_agent import ProductAgent

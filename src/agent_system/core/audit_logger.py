@@ -56,7 +56,7 @@ class AuditLogEntry(BaseModel):
     action: str = ""
     resource_id: str = ""
     resource_type: str = ""
-    details: Dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)
     ip_address: str = ""
     user_agent: str = ""
     outcome: str = "success"  # success / failure / denied
@@ -132,7 +132,7 @@ class AuditLogger:
     def __init__(self, log_dir: str = "data/audit"):
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self._in_memory: List[AuditLogEntry] = []
+        self._in_memory: list[AuditLogEntry] = []
 
     async def log(self, entry: AuditLogEntry) -> bool:
         """Write an audit entry. Non-blocking."""
@@ -155,12 +155,12 @@ class AuditLogger:
 
     def query(
         self,
-        user_id: Optional[str] = None,
-        action: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        user_id: str | None = None,
+        action: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         limit: int = 100,
-    ) -> List[AuditLogEntry]:
+    ) -> list[AuditLogEntry]:
         """Query audit log from in-memory store."""
         results = []
         for entry in self._in_memory:
@@ -196,7 +196,7 @@ class AuditLogger:
 
 
 # Global default
-_default_logger: Optional[AuditLogger] = None
+_default_logger: AuditLogger | None = None
 
 
 def get_audit_logger() -> AuditLogger:
@@ -229,11 +229,11 @@ class BatchAuditLogger:
     Falls back to synchronous write if no event loop is running.
     """
 
-    def __init__(self, config: Optional[AuditConfig] = None):
+    def __init__(self, config: AuditConfig | None = None):
         self.config = config or AuditConfig()
-        self._in_memory: List[AuditLogEntry] = []
-        self._queue: Optional[asyncio.Queue] = None
-        self._flush_task: Optional[asyncio.Task] = None
+        self._in_memory: list[AuditLogEntry] = []
+        self._queue: asyncio.Queue | None = None
+        self._flush_task: asyncio.Task | None = None
         self._closed = False
         if self.config.enabled:
             Path(self.config.log_dir).mkdir(parents=True, exist_ok=True)
@@ -306,7 +306,7 @@ class BatchAuditLogger:
         """Drain up to batch_size entries from queue and write them."""
         if self._queue is None:
             return 0
-        batch: List[AuditLogEntry] = []
+        batch: list[AuditLogEntry] = []
         for _ in range(self.config.batch_size):
             try:
                 entry = self._queue.get_nowait()
@@ -317,10 +317,10 @@ class BatchAuditLogger:
             return 0
         return await self._write_batch(batch)
 
-    async def _write_batch(self, batch: List[AuditLogEntry]) -> int:
+    async def _write_batch(self, batch: list[AuditLogEntry]) -> int:
         """Write a batch of entries as a single file append."""
         # Group by date
-        by_date: Dict[str, List[str]] = {}
+        by_date: dict[str, list[str]] = {}
         for entry in batch:
             date_str = entry.timestamp.strftime("%Y-%m-%d")
             by_date.setdefault(date_str, []).append(entry.model_dump_json())
@@ -359,7 +359,7 @@ class BatchAuditLogger:
 
     # ── Retention ──
 
-    def purge_old_entries(self, retention_days: Optional[int] = None) -> int:
+    def purge_old_entries(self, retention_days: int | None = None) -> int:
         """Delete audit-*.jsonl files older than retention_days. Returns count deleted."""
         from datetime import datetime, timezone, timedelta
         retention = retention_days if retention_days is not None else self.config.retention_days
@@ -384,14 +384,14 @@ class BatchAuditLogger:
 
     def query_from_disk(
         self,
-        user_id: Optional[str] = None,
-        action: Optional[str] = None,
-        outcome: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        request_id: Optional[str] = None,
+        user_id: str | None = None,
+        action: str | None = None,
+        outcome: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        request_id: str | None = None,
         limit: int = 100,
-    ) -> List[AuditLogEntry]:
+    ) -> list[AuditLogEntry]:
         """
         Query audit log entries from disk (JSONL files).
 
@@ -409,7 +409,7 @@ class BatchAuditLogger:
         # Determine date range from filenames
         start = datetime.fromisoformat(start_date) if start_date else None
         end = datetime.fromisoformat(end_date) if end_date else None
-        results: List[AuditLogEntry] = []
+        results: list[AuditLogEntry] = []
         for jsonl_file in sorted(log_dir.glob("audit-*.jsonl")):
             # Quick skip if filename date out of range
             try:
@@ -452,12 +452,12 @@ class BatchAuditLogger:
 
     def query(
         self,
-        user_id: Optional[str] = None,
-        action: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        user_id: str | None = None,
+        action: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         limit: int = 100,
-    ) -> List[AuditLogEntry]:
+    ) -> list[AuditLogEntry]:
         """Query from in-memory store (legacy API)."""
         results = []
         for entry in self._in_memory:
@@ -472,7 +472,7 @@ class BatchAuditLogger:
 
 
 # Override the default logger to be BatchAuditLogger
-_default_logger: Optional[BatchAuditLogger] = None
+_default_logger: BatchAuditLogger | None = None
 
 
 def get_audit_logger() -> BatchAuditLogger:

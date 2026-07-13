@@ -43,27 +43,27 @@ class MetricValue(BaseModel):
     name: str
     value: float
     unit: str = "count"
-    labels: Dict[str, str] = Field(default_factory=dict)
+    labels: dict[str, str] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class MetricsSnapshot(BaseModel):
     """Snapshot of all 9 metrics"""
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    metrics: Dict[str, MetricValue] = Field(default_factory=dict)
+    metrics: dict[str, MetricValue] = Field(default_factory=dict)
 
 
 class TraceSpan(BaseModel):
     """A single span in a trace"""
     span_id: str = ""
     trace_id: str = ""
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     name: str = ""
     start_time: float = 0.0
     end_time: float = 0.0
     duration_ms: float = 0.0
     status: str = "ok"  # ok / error
-    attributes: Dict[str, Any] = Field(default_factory=dict)
+    attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 class MetricsCalculator:
@@ -78,10 +78,10 @@ class MetricsCalculator:
     specified in ARCHITECTURE.md Ch.10.3.
     """
 
-    def __init__(self, graph: Optional[MultiLinkGraph] = None):
+    def __init__(self, graph: MultiLinkGraph | None = None):
         self.graph = graph or get_graph()
 
-    def _safe_query(self, sql: str) -> Dict[str, float]:
+    def _safe_query(self, sql: str) -> dict[str, float]:
         """Run a dataview query and return its aggregations. Empty dict on parse failure."""
         try:
             return dataview_query(sql, graph=self.graph).aggregations
@@ -93,7 +93,7 @@ class MetricsCalculator:
         """Run a count query and return the integer value."""
         return int(self._safe_query(sql).get("count", 0) or 0)
 
-    def calculate_all(self) -> Dict[str, MetricValue]:
+    def calculate_all(self) -> dict[str, MetricValue]:
         """Calculate all 9 metrics at once"""
         return {
             "end_to_end_success_rate": self.end_to_end_success_rate(),
@@ -265,15 +265,15 @@ class SimpleTracer:
     """
 
     def __init__(self):
-        self._spans: List[TraceSpan] = []
+        self._spans: list[TraceSpan] = []
         self._max_spans: int = 10000
 
     def start_span(
         self,
         name: str,
         trace_id: str = "",
-        parent_id: Optional[str] = None,
-        attributes: Optional[Dict[str, Any]] = None,
+        parent_id: str | None = None,
+        attributes: dict[str, Any] | None = None,
     ) -> TraceSpan:
         import uuid
         span = TraceSpan(
@@ -295,13 +295,13 @@ class SimpleTracer:
         if len(self._spans) > self._max_spans:
             self._spans = self._spans[-self._max_spans:]
 
-    def get_trace(self, trace_id: str) -> List[TraceSpan]:
+    def get_trace(self, trace_id: str) -> list[TraceSpan]:
         return [s for s in self._spans if s.trace_id == trace_id]
 
-    def get_recent_spans(self, limit: int = 100) -> List[TraceSpan]:
+    def get_recent_spans(self, limit: int = 100) -> list[TraceSpan]:
         return self._spans[-limit:]
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         if not self._spans:
             return {"total_spans": 0}
         durations = [s.duration_ms for s in self._spans if s.duration_ms > 0]
@@ -393,7 +393,7 @@ class DataProvenance(BaseModel):
     cost_usd: float = 0.0
     error: str = ""  # populated on llm_failure
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
 
     def is_real(self) -> bool:
@@ -428,7 +428,7 @@ def build_provenance(
     source: ProvenanceSource,
     agent_name: str = "",
     task_id: str = "",
-    usage: Optional[Any] = None,  # LLMUsage, but keep loose to avoid cycle
+    usage: Any | None = None,  # LLMUsage, but keep loose to avoid cycle
     error: str = "",
 ) -> DataProvenance:
     """Build a DataProvenance from current call context.
@@ -481,7 +481,7 @@ def attach_provenance(
     output.metadata["data_provenance_badge"] = provenance.badge()
 
 
-def get_provenance(output) -> Optional[DataProvenance]:
+def get_provenance(output) -> DataProvenance | None:
     """Read back the provenance from an output's metadata, if present."""
     raw = output.metadata.get("data_provenance")
     if not raw:

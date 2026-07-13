@@ -60,8 +60,8 @@ class Notifier:
     """
 
     def __init__(self):
-        self._inbox: List[Notification] = []
-        self._handlers: Dict[NotificationChannel, List[Callable]] = {
+        self._inbox: list[Notification] = []
+        self._handlers: dict[NotificationChannel, list[Callable]] = {
             n: [] for n in NotificationChannel
         }
         self._handlers[NotificationChannel.LOG].append(self._log_handler)
@@ -103,7 +103,7 @@ class Notifier:
         error: str,
         agent_name: str = "",
         severity: str = "warning",
-    ) -> List[Notification]:
+    ) -> list[Notification]:
         """Notify about a task failure across all relevant channels."""
         notifications = []
         for ch in [NotificationChannel.IN_APP, NotificationChannel.LOG]:
@@ -119,10 +119,10 @@ class Notifier:
 
     def get_inbox(
         self,
-        recipient: Optional[str] = None,
+        recipient: str | None = None,
         unread_only: bool = False,
         limit: int = 50,
-    ) -> List[Notification]:
+    ) -> list[Notification]:
         items = [
             n for n in self._inbox
             if (recipient is None or n.recipient == recipient)
@@ -178,8 +178,8 @@ class ResumeOffer(BaseModel):
     can_resume: bool
     resume_token: str
     status: ResumeStatus = ResumeStatus.PENDING
-    steps_completed: List[str] = Field(default_factory=list)
-    steps_pending: List[str] = Field(default_factory=list)
+    steps_completed: list[str] = Field(default_factory=list)
+    steps_pending: list[str] = Field(default_factory=list)
 
 
 class ResumeManager:
@@ -189,15 +189,15 @@ class ResumeManager:
     later resume from the last good state.
     """
 
-    def __init__(self, checkpoint_store: Optional[CheckpointStore] = None):
+    def __init__(self, checkpoint_store: CheckpointStore | None = None):
         self.store = checkpoint_store or CheckpointStore()
-        self._offers: Dict[str, ResumeOffer] = {}
+        self._offers: dict[str, ResumeOffer] = {}
 
     def create_offer(
         self,
         task_id: str,
         error: str,
-    ) -> Optional[ResumeOffer]:
+    ) -> ResumeOffer | None:
         """Create a resume offer if a checkpoint exists for this task."""
         cp = self.store.load(task_id)
         if not cp:
@@ -216,13 +216,13 @@ class ResumeManager:
         self._offers[task_id] = offer
         return offer
 
-    def get_offer(self, task_id: str) -> Optional[ResumeOffer]:
+    def get_offer(self, task_id: str) -> ResumeOffer | None:
         return self._offers.get(task_id)
 
     def list_offers(
         self,
-        status: Optional[ResumeStatus] = None,
-    ) -> List[ResumeOffer]:
+        status: ResumeStatus | None = None,
+    ) -> list[ResumeOffer]:
         offers = list(self._offers.values())
         if status:
             offers = [o for o in offers if o.status == status]
@@ -232,7 +232,7 @@ class ResumeManager:
         self,
         task_id: str,
         resume_token: str,
-    ) -> Optional[ResumeOffer]:
+    ) -> ResumeOffer | None:
         """User accepts the resume offer."""
         offer = self._offers.get(task_id)
         if not offer or offer.resume_token != resume_token:
@@ -247,7 +247,7 @@ class ResumeManager:
         offer.status = ResumeStatus.ABANDONED
         return True
 
-    def build_resume_payload(self, task_id: str) -> Optional[Dict[str, Any]]:
+    def build_resume_payload(self, task_id: str) -> dict[str, Any] | None:
         """Build a payload the calling code can use to restart a task."""
         offer = self._offers.get(task_id)
         if not offer or offer.status != ResumeStatus.RESUMED:
@@ -267,8 +267,8 @@ class ResumeManager:
 
 
 # Global instances
-_default_notifier: Optional[Notifier] = None
-_default_resume: Optional[ResumeManager] = None
+_default_notifier: Notifier | None = None
+_default_resume: ResumeManager | None = None
 
 
 def get_notifier() -> Notifier:

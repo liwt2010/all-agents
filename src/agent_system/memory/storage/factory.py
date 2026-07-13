@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_storage(
-    backend: Optional[str] = None,
+    backend: str | None = None,
     **kwargs,
 ) -> GraphStorage:
     """

@@ -108,18 +108,18 @@ class QuotaStore:
 
     def __init__(self, initial_llm_rate: float = 100.0):
         self._today = date.today()
-        self._user_usage: Dict[str, UsageSnapshot] = {}
-        self._dept_usage: Dict[str, UsageSnapshot] = {}
+        self._user_usage: dict[str, UsageSnapshot] = {}
+        self._dept_usage: dict[str, UsageSnapshot] = {}
         self._system_usage = UsageSnapshot(date_str=str(self._today))
-        self._concurrent: Dict[str, int] = defaultdict(int)  # user_id -> count
-        self._dept_concurrent: Dict[str, int] = defaultdict(int)
+        self._concurrent: dict[str, int] = defaultdict(int)  # user_id -> count
+        self._dept_concurrent: dict[str, int] = defaultdict(int)
         self._llm_token_bucket: float = initial_llm_rate  # start full
         self._llm_last_refill: float = time.time()
         # Real FIFO waiting queues per scope (user_id or dept_id)
-        self._user_queues: Dict[str, "asyncio.Queue"] = {}
-        self._dept_queues: Dict[str, "asyncio.Queue"] = {}
-        self._queued_user_count: Dict[str, int] = {}
-        self._queued_dept_count: Dict[str, int] = {}
+        self._user_queues: dict[str, "asyncio.Queue"] = {}
+        self._dept_queues: dict[str, "asyncio.Queue"] = {}
+        self._queued_user_count: dict[str, int] = {}
+        self._queued_dept_count: dict[str, int] = {}
 
     def _check_reset(self):
         """Reset daily counters if day changed"""
@@ -201,7 +201,7 @@ class QuotaManager:
 
     def __init__(self):
         self.store = QuotaStore()
-        self.limits: Dict[QuotaLevel, QuotaLimit] = DEFAULT_QUOTAS.copy()
+        self.limits: dict[QuotaLevel, QuotaLimit] = DEFAULT_QUOTAS.copy()
 
     def set_limit(self, level: QuotaLevel, limit: QuotaLimit):
         """Override default quota for a level"""
@@ -213,7 +213,7 @@ class QuotaManager:
         department_id: str = "",
         estimated_cost: float = 0.0,
         estimated_tokens: int = 0,
-    ) -> Tuple[QuotaAction, str]:
+    ) -> tuple[QuotaAction, str]:
         """
         Check if a task should be allowed at all levels.
 
@@ -260,13 +260,13 @@ class QuotaManager:
         """Record usage after task completion"""
         self.store.record_usage(record)
 
-    def get_user_usage(self, user_id: str) -> Optional[UsageSnapshot]:
+    def get_user_usage(self, user_id: str) -> UsageSnapshot | None:
         return self.store._user_usage.get(user_id)
 
     def get_system_usage(self) -> UsageSnapshot:
         return self.store._system_usage
 
-    def get_dept_usage(self, dept_id: str) -> Optional[UsageSnapshot]:
+    def get_dept_usage(self, dept_id: str) -> UsageSnapshot | None:
         return self.store._dept_usage.get(dept_id)
 
     # ── Real FIFO waiting queues ──

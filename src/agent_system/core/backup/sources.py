@@ -182,7 +182,7 @@ def snapshot_custom_agents(source_dir: str, dest_dir: Path) -> ComponentInfo:
     )
 
 
-def snapshot_tasks(source_path: Optional[str], dest_dir: Path) -> ComponentInfo:
+def snapshot_tasks(source_path: str | None, dest_dir: Path) -> ComponentInfo:
     """Snapshot task store file (if it exists as a file; in-memory store returns empty)."""
     tasks_dest = dest_dir / "tasks"
     tasks_dest.mkdir(parents=True, exist_ok=True)

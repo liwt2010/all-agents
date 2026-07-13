@@ -75,7 +75,7 @@ class PostgresBackend:
         port: int = 5432,
         database: str = "all_agents",
         user: str = "all_agents",
-        password: Optional[str] = None,
+        password: str | None = None,
         pool_min: int = 2,
         pool_max: int = 20,
     ):
@@ -186,7 +186,7 @@ class PostgresBackend:
                 )
             conn.commit()
 
-    def load_node(self, node_id: str) -> Optional[GraphNode]:
+    def load_node(self, node_id: str) -> GraphNode | None:
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -206,7 +206,7 @@ class PostgresBackend:
             conn.commit()
             return deleted
 
-    def list_nodes(self, node_type: Optional[NodeType] = None) -> List[GraphNode]:
+    def list_nodes(self, node_type: NodeType | None = None) -> list[GraphNode]:
         with self._conn() as conn:
             with conn.cursor() as cur:
                 if node_type:
@@ -252,8 +252,8 @@ class PostgresBackend:
         self,
         node_id: str,
         direction: str = "out",
-        link_type: Optional[str] = None,
-    ) -> List[GraphLink]:
+        link_type: str | None = None,
+    ) -> list[GraphLink]:
         with self._conn() as conn:
             with conn.cursor() as cur:
                 if direction == "out":

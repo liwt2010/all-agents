@@ -81,13 +81,13 @@ class FTUEState(BaseModel):
     tenant_id: str = "default"
     current_step: FTUEStep = FTUEStep.AUTO_ACCOUNT
     started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    completed_at: Optional[datetime] = None
-    sample_picked_id: Optional[str] = None
-    first_task_id: Optional[str] = None
-    choice: Optional[str] = None  # "continue" / "tutorial" / "skip"
+    completed_at: datetime | None = None
+    sample_picked_id: str | None = None
+    first_task_id: str | None = None
+    choice: str | None = None  # "continue" / "tutorial" / "skip"
 
     @property
-    def time_to_value_seconds(self) -> Optional[float]:
+    def time_to_value_seconds(self) -> float | None:
         """Time from FTUE start to first task completion (TTV metric)."""
         if not self.completed_at:
             return None
@@ -107,7 +107,7 @@ class FTUEManager:
     DEFAULT_TTV_TARGET = 30.0  # seconds
 
     def __init__(self):
-        self._states: Dict[str, FTUEState] = {}  # user_id -> state
+        self._states: dict[str, FTUEState] = {}  # user_id -> state
 
     def get_or_create(self, user_id: str, tenant_id: str = "default") -> FTUEState:
         key = self._key(user_id, tenant_id)
@@ -115,7 +115,7 @@ class FTUEManager:
             self._states[key] = FTUEState(user_id=user_id, tenant_id=tenant_id)
         return self._states[key]
 
-    def get_state(self, user_id: str, tenant_id: str = "default") -> Optional[FTUEState]:
+    def get_state(self, user_id: str, tenant_id: str = "default") -> FTUEState | None:
         return self._states.get(self._key(user_id, tenant_id))
 
     def advance(self, user_id: str, step: FTUEStep, tenant_id: str = "default") -> FTUEState:
@@ -135,16 +135,16 @@ class FTUEManager:
         state.choice = choice
         return state
 
-    def get_samples(self) -> List[FTUESampleTask]:
+    def get_samples(self) -> list[FTUESampleTask]:
         return DEFAULT_SAMPLES
 
-    def get_sample(self, sample_id: str) -> Optional[FTUESampleTask]:
+    def get_sample(self, sample_id: str) -> FTUESampleTask | None:
         for s in DEFAULT_SAMPLES:
             if s.id == sample_id:
                 return s
         return None
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """Aggregate FTUE statistics for monitoring."""
         total = len(self._states)
         completed = sum(1 for s in self._states.values() if s.completed_at)
@@ -168,7 +168,7 @@ class FTUEManager:
 
 
 # Global
-_default_manager: Optional[FTUEManager] = None
+_default_manager: FTUEManager | None = None
 
 
 def get_ftue_manager() -> FTUEManager:

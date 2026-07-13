@@ -27,11 +27,11 @@ class AuditQuery:
     matching AuditLogEntry sorted by timestamp (newest first by default).
     """
 
-    def __init__(self, audit_logger: Optional[AuditLogger] = None):
+    def __init__(self, audit_logger: AuditLogger | None = None):
         self.logger = audit_logger or AuditLogger()
         self.log_dir = self.logger.log_dir
 
-    def _all_entries(self, since: Optional[datetime] = None, limit: int = 10_000) -> List[AuditLogEntry]:
+    def _all_entries(self, since: datetime | None = None, limit: int = 10_000) -> list[AuditLogEntry]:
         """Load all entries (optionally filtered by date)."""
         results = []
         if not self.log_dir.exists():
@@ -58,13 +58,13 @@ class AuditQuery:
 
     def _filter(
         self,
-        entries: List[AuditLogEntry],
-        user_id: Optional[str] = None,
-        action: Optional[str] = None,
-        outcome: Optional[str] = None,
-        since: Optional[datetime] = None,
-        until: Optional[datetime] = None,
-    ) -> List[AuditLogEntry]:
+        entries: list[AuditLogEntry],
+        user_id: str | None = None,
+        action: str | None = None,
+        outcome: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[AuditLogEntry]:
         out = entries
         if user_id:
             out = [e for e in out if e.user_id == user_id]
@@ -80,7 +80,7 @@ class AuditQuery:
 
     # ── 1. user operation history ──
 
-    def query_by_user(self, user_id: str, days: int = 30, limit: int = 200) -> List[AuditLogEntry]:
+    def query_by_user(self, user_id: str, days: int = 30, limit: int = 200) -> list[AuditLogEntry]:
         since = datetime.now(timezone.utc) - timedelta(days=days)
         entries = self._all_entries(since=since, limit=limit)
         return self._filter(entries, user_id=user_id)
@@ -88,7 +88,7 @@ class AuditQuery:
     # ── 2. resource access records ──
 
     def query_by_resource(self, resource_type: str, resource_id: str,
-                          days: int = 30) -> List[AuditLogEntry]:
+                          days: int = 30) -> list[AuditLogEntry]:
         since = datetime.now(timezone.utc) - timedelta(days=days)
         entries = self._all_entries(since=since)
         out = []
@@ -99,14 +99,14 @@ class AuditQuery:
 
     # ── 3. permission denials ──
 
-    def query_permission_denials(self, days: int = 7) -> List[AuditLogEntry]:
+    def query_permission_denials(self, days: int = 7) -> list[AuditLogEntry]:
         since = datetime.now(timezone.utc) - timedelta(days=days)
         entries = self._all_entries(since=since)
         return [e for e in entries if e.outcome == "denied"]
 
     # ── 4. login history ──
 
-    def query_logins(self, user_id: Optional[str] = None, days: int = 30) -> List[AuditLogEntry]:
+    def query_logins(self, user_id: str | None = None, days: int = 30) -> list[AuditLogEntry]:
         return self._filter(
             self._all_entries(since=datetime.now(timezone.utc) - timedelta(days=days)),
             user_id=user_id, action="auth.login",
@@ -114,7 +114,7 @@ class AuditQuery:
 
     # ── 5. data exports ──
 
-    def query_data_exports(self, days: int = 30) -> List[AuditLogEntry]:
+    def query_data_exports(self, days: int = 30) -> list[AuditLogEntry]:
         return self._filter(
             self._all_entries(since=datetime.now(timezone.utc) - timedelta(days=days)),
             action="data.export",
@@ -122,7 +122,7 @@ class AuditQuery:
 
     # ── 6. config changes ──
 
-    def query_config_changes(self, days: int = 30) -> List[AuditLogEntry]:
+    def query_config_changes(self, days: int = 30) -> list[AuditLogEntry]:
         return [
             e for e in self._all_entries(since=datetime.now(timezone.utc) - timedelta(days=days))
             if e.action.startswith("config.")
@@ -130,7 +130,7 @@ class AuditQuery:
 
     # ── 7. cross-tenant ops ──
 
-    def query_cross_tenant_ops(self, days: int = 30) -> List[AuditLogEntry]:
+    def query_cross_tenant_ops(self, days: int = 30) -> list[AuditLogEntry]:
         return [
             e for e in self._all_entries(since=datetime.now(timezone.utc) - timedelta(days=days))
             if "cross_tenant" in (e.details or {})
@@ -138,7 +138,7 @@ class AuditQuery:
 
     # ── 8. deletions ──
 
-    def query_deletions(self, days: int = 30) -> List[AuditLogEntry]:
+    def query_deletions(self, days: int = 30) -> list[AuditLogEntry]:
         return [
             e for e in self._all_entries(since=datetime.now(timezone.utc) - timedelta(days=days))
             if e.action.startswith("delete") or e.outcome == "deletion"
@@ -146,7 +146,7 @@ class AuditQuery:
 
     # ── 9. failed operations ──
 
-    def query_failures(self, days: int = 1) -> List[AuditLogEntry]:
+    def query_failures(self, days: int = 1) -> list[AuditLogEntry]:
         return self._filter(
             self._all_entries(since=datetime.now(timezone.utc) - timedelta(days=days)),
             outcome="failure",
@@ -154,7 +154,7 @@ class AuditQuery:
 
     # ── 10. suspicious IPs ──
 
-    def query_suspicious_ips(self, days: int = 7, threshold: int = 50) -> List[Dict[str, Any]]:
+    def query_suspicious_ips(self, days: int = 7, threshold: int = 50) -> list[dict[str, Any]]:
         """Return IPs that exceed the request threshold (denied + failure events)."""
         since = datetime.now(timezone.utc) - timedelta(days=days)
         entries = self._all_entries(since=since)
@@ -170,7 +170,7 @@ class AuditQuery:
 
     # ── 11. escalations ──
 
-    def query_escalations(self, days: int = 30) -> List[AuditLogEntry]:
+    def query_escalations(self, days: int = 30) -> list[AuditLogEntry]:
         return self._filter(
             self._all_entries(since=datetime.now(timezone.utc) - timedelta(days=days)),
             action="agent.escalated",
@@ -178,7 +178,7 @@ class AuditQuery:
 
     # ── 12. peer discussions ──
 
-    def query_discussions(self, days: int = 30) -> List[AuditLogEntry]:
+    def query_discussions(self, days: int = 30) -> list[AuditLogEntry]:
         return self._filter(
             self._all_entries(since=datetime.now(timezone.utc) - timedelta(days=days)),
             action="agent.peer.discussion",
@@ -186,7 +186,7 @@ class AuditQuery:
 
     # ── 13. billing events ──
 
-    def query_billing_events(self, days: int = 30) -> List[AuditLogEntry]:
+    def query_billing_events(self, days: int = 30) -> list[AuditLogEntry]:
         return [
             e for e in self._all_entries(since=datetime.now(timezone.utc) - timedelta(days=days))
             if e.action.startswith("billing.")
@@ -196,17 +196,17 @@ class AuditQuery:
 
     def custom_query(
         self,
-        user_id: Optional[str] = None,
-        action: Optional[str] = None,
-        action_prefix: Optional[str] = None,
-        resource_type: Optional[str] = None,
-        resource_id: Optional[str] = None,
-        outcome: Optional[str] = None,
-        since: Optional[datetime] = None,
-        until: Optional[datetime] = None,
-        ip_address: Optional[str] = None,
+        user_id: str | None = None,
+        action: str | None = None,
+        action_prefix: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        outcome: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        ip_address: str | None = None,
         limit: int = 200,
-    ) -> List[AuditLogEntry]:
+    ) -> list[AuditLogEntry]:
         """Ad-hoc query with arbitrary filters."""
         since = since or (datetime.now(timezone.utc) - timedelta(days=30))
         entries = self._all_entries(since=since, limit=limit)
@@ -254,7 +254,7 @@ class AlertEvent(BaseModel):
     threshold: float
     window_minutes: int
     triggered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    related_entries: List[str] = Field(default_factory=list)  # entry ids
+    related_entries: list[str] = Field(default_factory=list)  # entry ids
 
 
 class AlertEvaluator:
@@ -307,13 +307,13 @@ class AlertEvaluator:
         ),
     ]
 
-    def __init__(self, query: Optional[AuditQuery] = None):
+    def __init__(self, query: AuditQuery | None = None):
         self.query = query or AuditQuery()
-        self.rules: List[AlertRule] = list(self.DEFAULT_RULES)
+        self.rules: list[AlertRule] = list(self.DEFAULT_RULES)
 
-    def evaluate(self, window_minutes: Optional[int] = None) -> List[AlertEvent]:
+    def evaluate(self, window_minutes: int | None = None) -> list[AlertEvent]:
         """Run all rules and return fired alerts."""
-        alerts: List[AlertEvent] = []
+        alerts: list[AlertEvent] = []
         for rule in self.rules:
             fired = self._evaluate_rule(rule, window_minutes)
             if fired:
@@ -323,8 +323,8 @@ class AlertEvaluator:
     def _evaluate_rule(
         self,
         rule: AlertRule,
-        window_minutes: Optional[int],
-    ) -> List[AlertEvent]:
+        window_minutes: int | None,
+    ) -> list[AlertEvent]:
         now = datetime.now(timezone.utc)
         if rule.window_minutes > 0:
             wm = window_minutes or rule.window_minutes
@@ -366,11 +366,11 @@ class AlertEvaluator:
     def _check_count_rule(
         self,
         rule: AlertRule,
-        entries: List[AuditLogEntry],
+        entries: list[AuditLogEntry],
         outcome: str,
         threshold: int,
-        action_filter: Optional[str] = None,
-    ) -> List[AlertEvent]:
+        action_filter: str | None = None,
+    ) -> list[AlertEvent]:
         matched = [e for e in entries if e.outcome == outcome]
         if action_filter:
             matched = [e for e in matched if e.action == action_filter]
@@ -387,7 +387,7 @@ class AlertEvaluator:
         rule: AlertRule,
         value: float,
         message: str,
-        entry_ids: Optional[List[str]] = None,
+        entry_ids: list[str] | None = None,
     ) -> AlertEvent:
         return AlertEvent(
             rule_name=rule.name,
@@ -399,5 +399,5 @@ class AlertEvaluator:
             related_entries=entry_ids or [],
         )
 
-    def list_rules(self) -> List[AlertRule]:
+    def list_rules(self) -> list[AlertRule]:
         return list(self.rules)

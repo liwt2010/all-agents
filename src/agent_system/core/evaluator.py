@@ -51,7 +51,7 @@ class ProblemAnalysis(BaseModel):
     needs_peer_help: bool = False
     action_category: ActionCategory = ActionCategory.NORMAL
     suggested_path: ResolutionPath = ResolutionPath.SELF
-    similar_experiences: List[Dict[str, Any]] = Field(default_factory=list)
+    similar_experiences: list[dict[str, Any]] = Field(default_factory=list)
     reasoning: str = ""
     error_summary: str = ""
 
@@ -96,9 +96,9 @@ class ProblemEvaluator:
         self,
         error_message: str,
         agent_name: str,
-        agent_capabilities: List[str],
-        attempted_action: Optional[str] = None,
-        task_input: Optional[str] = None,
+        agent_capabilities: list[str],
+        attempted_action: str | None = None,
+        task_input: str | None = None,
         retry_count: int = 0,
     ) -> ProblemAnalysis:
         """Evaluate a problem and recommend resolution path"""
@@ -214,10 +214,10 @@ class ProblemEvaluator:
     def _assess_self_solve(
         self,
         error_lower: str,
-        capabilities: List[str],
-        similar_experiences: List[Tuple],
+        capabilities: list[str],
+        similar_experiences: list[tuple],
         retry_count: int,
-    ) -> Tuple[bool, float]:
+    ) -> tuple[bool, float]:
         """Can the agent solve this on its own?"""
         # Already retried too many times
         if retry_count >= 2:

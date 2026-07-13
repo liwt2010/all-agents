@@ -32,7 +32,7 @@ def _get_base_dir() -> Path:
     return Path(settings.memory.graph_dir).resolve()
 
 
-def save_node(node: GraphNode, base_dir: Optional[Path] = None) -> bool:
+def save_node(node: GraphNode, base_dir: Path | None = None) -> bool:
     """Save a single node to disk"""
     if base_dir is None:
         base_dir = _get_base_dir()
@@ -48,7 +48,7 @@ def save_node(node: GraphNode, base_dir: Optional[Path] = None) -> bool:
         return False
 
 
-def load_node(node_id: str, base_dir: Optional[Path] = None) -> Optional[GraphNode]:
+def load_node(node_id: str, base_dir: Path | None = None) -> GraphNode | None:
     """Load a single node from disk"""
     if base_dir is None:
         base_dir = _get_base_dir()
@@ -73,7 +73,7 @@ def load_node(node_id: str, base_dir: Optional[Path] = None) -> Optional[GraphNo
     return None
 
 
-def save_link(link: GraphLink, base_dir: Optional[Path] = None) -> bool:
+def save_link(link: GraphLink, base_dir: Path | None = None) -> bool:
     """Save a link to the monthly JSONL file"""
     if base_dir is None:
         base_dir = _get_base_dir()
@@ -95,7 +95,7 @@ def save_link(link: GraphLink, base_dir: Optional[Path] = None) -> bool:
         return False
 
 
-def save_graph(graph: MultiLinkGraph, base_dir: Optional[Path] = None) -> int:
+def save_graph(graph: MultiLinkGraph, base_dir: Path | None = None) -> int:
     """Persist entire graph to disk. Returns count of items saved."""
     if base_dir is None:
         base_dir = _get_base_dir()
@@ -120,7 +120,7 @@ def save_graph(graph: MultiLinkGraph, base_dir: Optional[Path] = None) -> int:
     return count
 
 
-def load_graph(base_dir: Optional[Path] = None) -> MultiLinkGraph:
+def load_graph(base_dir: Path | None = None) -> MultiLinkGraph:
     """Load entire graph from disk"""
     if base_dir is None:
         base_dir = _get_base_dir()
@@ -179,7 +179,7 @@ def load_graph(base_dir: Optional[Path] = None) -> MultiLinkGraph:
 
 # ── Archive / vacuum ──
 
-def archive_node_to_disk(node: GraphNode, base_dir: Optional[Path] = None) -> bool:
+def archive_node_to_disk(node: GraphNode, base_dir: Path | None = None) -> bool:
     """
     Write a node JSON to data/graph/archive/{type}/{id}-{ts}.json.
     The original nodes/ copy is left intact (so we can verify before vacuum).
@@ -200,7 +200,7 @@ def archive_node_to_disk(node: GraphNode, base_dir: Optional[Path] = None) -> bo
         return False
 
 
-def list_archived(base_dir: Optional[Path] = None) -> list:
+def list_archived(base_dir: Path | None = None) -> list:
     """List all archived node JSON files."""
     if base_dir is None:
         base_dir = _get_base_dir()
@@ -210,7 +210,7 @@ def list_archived(base_dir: Optional[Path] = None) -> list:
     return [str(p) for p in archive_dir.rglob("*.json")]
 
 
-def vacuum_archived(retention_days: int = 365, base_dir: Optional[Path] = None) -> int:
+def vacuum_archived(retention_days: int = 365, base_dir: Path | None = None) -> int:
     """
     Permanently delete archived nodes older than retention_days.
     Returns count of files deleted.
@@ -267,7 +267,7 @@ class StorageManager:
 
     def __init__(
         self,
-        backend: Optional[str] = None,
+        backend: str | None = None,
         **kwargs,
     ):
         self._backend: GraphStorage = get_storage(backend, **kwargs)
@@ -312,7 +312,7 @@ class StorageManager:
             logger.error(f"StorageManager.save_node({node.id}) failed: {e}")
             return False
 
-    def load_node(self, node_id: str) -> Optional[GraphNode]:
+    def load_node(self, node_id: str) -> GraphNode | None:
         return self._backend.load_node(node_id)
 
     def delete_node(self, node_id: str) -> bool:

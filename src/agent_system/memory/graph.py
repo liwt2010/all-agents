@@ -77,8 +77,8 @@ class GraphNode(BaseModel):
     """图节点"""
     id: str
     type: NodeType
-    content: Dict[str, Any] = Field(default_factory=dict)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    content: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -97,7 +97,7 @@ class GraphLink(BaseModel):
     target_id: str
     link_type: LinkType
     weight: float = 1.0
-    context: Dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_by: str = "system"
 
@@ -115,7 +115,7 @@ class NeighborResult(BaseModel):
 class PathResult(BaseModel):
     """路径查询结果"""
     found: bool = False
-    path: List[Tuple[GraphNode, GraphLink]] = Field(default_factory=list)
+    path: list[tuple[GraphNode, GraphLink]] = Field(default_factory=list)
     length: int = 0
 
 
@@ -125,10 +125,10 @@ class MultiLinkGraph:
     """多向链接图 — Agent 记忆系统的核心"""
 
     def __init__(self):
-        self._nodes: Dict[str, GraphNode] = {}        # node_id -> node
-        self._outgoing: Dict[str, List[GraphLink]] = defaultdict(list)  # source -> links
-        self._incoming: Dict[str, List[GraphLink]] = defaultdict(list)  # target -> links
-        self._type_index: Dict[NodeType, Set[str]] = defaultdict(set)   # type -> node_ids
+        self._nodes: dict[str, GraphNode] = {}        # node_id -> node
+        self._outgoing: dict[str, list[GraphLink]] = defaultdict(list)  # source -> links
+        self._incoming: dict[str, list[GraphLink]] = defaultdict(list)  # target -> links
+        self._type_index: dict[NodeType, set[str]] = defaultdict(set)   # type -> node_ids
 
     # ── 节点操作 ──
 
@@ -144,7 +144,7 @@ class MultiLinkGraph:
         logger.debug(f"Graph: added/updated node {node.id} ({node.type.value})")
         return node.id
 
-    def get_node(self, node_id: str) -> Optional[GraphNode]:
+    def get_node(self, node_id: str) -> GraphNode | None:
         return self._nodes.get(node_id)
 
     def has_node(self, node_id: str) -> bool:
@@ -152,9 +152,9 @@ class MultiLinkGraph:
 
     def find_nodes(
         self,
-        node_type: Optional[NodeType] = None,
+        node_type: NodeType | None = None,
         **filters,
-    ) -> List[GraphNode]:
+    ) -> list[GraphNode]:
         """按类型和可选的 content 字段过滤查找节点"""
         if node_type:
             ids = self._type_index.get(node_type, set())
@@ -220,7 +220,7 @@ class MultiLinkGraph:
     def find_orphan_nodes(
         self,
         reference_window_days: int = 30,
-        exclude_types: Optional[list] = None,
+        exclude_types: list | None = None,
     ) -> list:
         """
         Find nodes that:
@@ -247,7 +247,7 @@ class MultiLinkGraph:
         self,
         older_than_days: int = 90,
         reference_window_days: int = 30,
-        exclude_types: Optional[list] = None,
+        exclude_types: list | None = None,
     ) -> int:
         """
         Find orphan nodes and archive them. Returns count archived.
@@ -303,7 +303,7 @@ class MultiLinkGraph:
             ]
         return True
 
-    def age_buckets(self) -> Dict[str, Dict[str, int]]:
+    def age_buckets(self) -> dict[str, dict[str, int]]:
         """
         Return age distribution per node type. Useful for admin dashboards.
         Buckets: <1d, 1-7d, 7-30d, 30-90d, >90d
@@ -347,7 +347,7 @@ class MultiLinkGraph:
         target_id: str,
         link_type: LinkType,
         weight: float = 1.0,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
         created_by: str = "system",
     ) -> bool:
         """在两个节点之间建立链接。两个节点都必须存在。"""
@@ -372,14 +372,14 @@ class MultiLinkGraph:
         logger.debug(f"Graph: linked {source_id} -[{link_type.value}]-> {target_id}")
         return True
 
-    def get_outgoing(self, node_id: str, link_type: Optional[LinkType] = None) -> List[GraphLink]:
+    def get_outgoing(self, node_id: str, link_type: LinkType | None = None) -> list[GraphLink]:
         """获取节点的出边"""
         links = self._outgoing.get(node_id, [])
         if link_type:
             return [l for l in links if l.link_type == link_type]
         return links
 
-    def get_incoming(self, node_id: str, link_type: Optional[LinkType] = None) -> List[GraphLink]:
+    def get_incoming(self, node_id: str, link_type: LinkType | None = None) -> list[GraphLink]:
         """获取节点的入边"""
         links = self._incoming.get(node_id, [])
         if link_type:
@@ -388,7 +388,7 @@ class MultiLinkGraph:
 
     def get_links_between(
         self, source_id: str, target_id: str,
-    ) -> List[GraphLink]:
+    ) -> list[GraphLink]:
         """获取两个节点之间的所有链接"""
         outgoing = self._outgoing.get(source_id, [])
         return [l for l in outgoing if l.target_id == target_id]
@@ -397,7 +397,7 @@ class MultiLinkGraph:
         # Count unique links (sum of all outgoing)
         return sum(len(links) for links in self._outgoing.values())
 
-    def delete_links(self, source_id: str, target_id: str, link_type: Optional[LinkType] = None) -> int:
+    def delete_links(self, source_id: str, target_id: str, link_type: LinkType | None = None) -> int:
         """删除两节点间的链接。返回删除数量。"""
         before = len(self._outgoing.get(source_id, []))
         self._outgoing[source_id] = [
@@ -413,7 +413,7 @@ class MultiLinkGraph:
 
     # ── 高级查询 ──
 
-    def neighbors(self, node_id: str, depth: int = 1, max_depth: int = 3) -> List[NeighborResult]:
+    def neighbors(self, node_id: str, depth: int = 1, max_depth: int = 3) -> list[NeighborResult]:
         """N 步邻居查询"""
         if depth > max_depth:
             return []
@@ -504,7 +504,7 @@ class MultiLinkGraph:
 
         return PathResult(found=False)
 
-    def related_with_context(self, node_id: str, max_depth: int = 2) -> Dict[str, Any]:
+    def related_with_context(self, node_id: str, max_depth: int = 2) -> dict[str, Any]:
         """获取节点及相关节点的完整上下文"""
         node = self.get_node(node_id)
         if not node:
@@ -530,7 +530,7 @@ class MultiLinkGraph:
 
     # ── 统计 ──
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """图统计"""
         type_counts = {}
         for ntype, ids in self._type_index.items():
@@ -552,7 +552,7 @@ class MultiLinkGraph:
 
 # ── 全局图实例 ──
 
-_graph: Optional[MultiLinkGraph] = None
+_graph: MultiLinkGraph | None = None
 
 
 def get_graph() -> MultiLinkGraph:
@@ -573,7 +573,7 @@ def reset_graph():
 # ── Dataview integration (PR 1) ─────────────────────────────────────
 # Thin wrapper so callers can do `graph.query("SELECT ...")`.
 
-def query(self_or_sql, sql: Optional[str] = None) -> Any:
+def query(self_or_sql, sql: str | None = None) -> Any:
     """Dataview query convenience method.
 
     Two call styles:

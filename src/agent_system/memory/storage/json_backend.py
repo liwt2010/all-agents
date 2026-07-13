@@ -74,7 +74,7 @@ class JSONBackend:
             logger.error(f"JSONBackend: failed to save node {node.id}: {e}")
             raise
 
-    def load_node(self, node_id: str) -> Optional[GraphNode]:
+    def load_node(self, node_id: str) -> GraphNode | None:
         # Search all type dirs
         nodes_dir = self._node_search_path(node_id)
         if not nodes_dir.exists():
@@ -111,7 +111,7 @@ class JSONBackend:
         self.delete_links_for_node(node_id)
         return deleted
 
-    def list_nodes(self, node_type: Optional[NodeType] = None) -> List[GraphNode]:
+    def list_nodes(self, node_type: NodeType | None = None) -> list[GraphNode]:
         nodes = []
         nodes_dir = self.base_dir / "nodes"
         if not nodes_dir.exists():
@@ -151,8 +151,8 @@ class JSONBackend:
         self,
         node_id: str,
         direction: str = "out",
-        link_type: Optional[str] = None,
-    ) -> List[GraphLink]:
+        link_type: str | None = None,
+    ) -> list[GraphLink]:
         links = []
         links_root = self.base_dir / "links"
         if not links_root.exists():

@@ -36,7 +36,7 @@ class GraphStorage(Protocol):
     def delete_node(self, node_id: str) -> bool:
         """Delete a node. Returns True if existed."""
 
-    def list_nodes(self, node_type: Optional["NodeType"] = None) -> List["GraphNode"]:
+    def list_nodes(self, node_type: Optional["NodeType"] = None) -> list["GraphNode"]:
         """List all nodes, optionally filtered by type."""
 
     # ── Link operations ──
@@ -48,8 +48,8 @@ class GraphStorage(Protocol):
         self,
         node_id: str,
         direction: str = "out",
-        link_type: Optional[str] = None,
-    ) -> List["GraphLink"]:
+        link_type: str | None = None,
+    ) -> list["GraphLink"]:
         """List links connected to a node.
         direction: 'out' = outgoing, 'in' = incoming, 'both' = either.
         """

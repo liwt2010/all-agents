@@ -59,12 +59,12 @@ class ResolutionResult(BaseModel):
     """Result of a resolution attempt"""
     path: ResolutionPath
     status: ResolutionStatus
-    output: Optional[OutputSchema] = None
-    error: Optional[str] = None
-    analysis: Optional[ProblemAnalysis] = None
-    discussion_log: List[Dict[str, Any]] = Field(default_factory=list)
-    human_request: Optional[Dict[str, Any]] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    output: OutputSchema | None = None
+    error: str | None = None
+    analysis: ProblemAnalysis | None = None
+    discussion_log: list[dict[str, Any]] = Field(default_factory=list)
+    human_request: dict[str, Any] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class PeerDiscussionMessage(BaseModel):
@@ -86,7 +86,7 @@ class SmartResolver:
     def __init__(
         self,
         agent: SmartAgent,
-        evaluator: Optional[ProblemEvaluator] = None,
+        evaluator: ProblemEvaluator | None = None,
     ):
         self.agent = agent
         self.evaluator = evaluator or default_evaluator
@@ -95,7 +95,7 @@ class SmartResolver:
         self,
         task: TaskContext,
         error: Exception,
-        analysis: Optional[ProblemAnalysis] = None,
+        analysis: ProblemAnalysis | None = None,
     ) -> ResolutionResult:
         """Run the full resolution pipeline: evaluate -> execute path"""
         # 1. Analyze if not provided
@@ -371,7 +371,7 @@ class SmartResolver:
         error: Exception,
         analysis: ProblemAnalysis,
         max_rounds: int = 3,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Real peer discussion using round-robin protocol.
 
@@ -450,7 +450,7 @@ class SmartResolver:
 
         return discussion
 
-    def _discover_peers(self, analysis: ProblemAnalysis) -> List[Tuple[str, SmartAgent]]:
+    def _discover_peers(self, analysis: ProblemAnalysis) -> list[tuple[str, SmartAgent]]:
         """Find peer agents relevant to this problem.
 
         Selection strategy:
@@ -464,7 +464,7 @@ class SmartResolver:
 
         # Discover peers via the global registry — no hardcoded agent list.
         peer_names = agent_registry.names_excluding(self.agent.agent_name)
-        peers: List[Tuple[str, SmartAgent]] = []
+        peers: list[tuple[str, SmartAgent]] = []
         for name in peer_names:
             instance = agent_registry.get_instance(name)
             if instance is not None:
@@ -484,7 +484,7 @@ class SmartResolver:
         peers.sort(key=lambda p: relevance_score(p[1]), reverse=True)
         return peers[:3]  # Top 3 peers (was 2; registry opens more peers)
 
-    def _extract_solution_from_discussion(self, discussion: List[Dict[str, Any]]) -> str:
+    def _extract_solution_from_discussion(self, discussion: list[dict[str, Any]]) -> str:
         """Extract the original agent's refined approach as the solution."""
         for msg in reversed(discussion):
             if msg.get("role") == "synthesizer":
@@ -494,7 +494,7 @@ class SmartResolver:
                 return msg["message"]
         return "no_solution"
 
-    def _assess_risk(self, analysis: ProblemAnalysis) -> Dict[str, Any]:
+    def _assess_risk(self, analysis: ProblemAnalysis) -> dict[str, Any]:
         """Assess risk level for human approval request"""
         risk_map = {
             Severity.CRITICAL: {"level": "critical", "description": "May cause system-wide impact"},

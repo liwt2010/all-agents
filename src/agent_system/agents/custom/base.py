@@ -37,10 +37,10 @@ class CustomAgentConfig(BaseModel):
     name: str
     description: str
     system_prompt: str
-    tools: List[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
     safety: CustomAgentSafety = CustomAgentSafety.NORMAL
-    llm_config: Dict[str, Any] = Field(default_factory=dict)
-    tenant_id: Optional[str] = None
+    llm_config: dict[str, Any] = Field(default_factory=dict)
+    tenant_id: str | None = None
 
     model_config = ConfigDict(extra="allow")
 

@@ -36,11 +36,11 @@ class TaskRecord(BaseModel):
     status: str = "pending"  # pending / running / completed / failed
     tenant_id: str = "default"
     user_id: str = ""
-    output: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    output: dict[str, Any] | None = None
+    error: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── Backend interface ──
@@ -54,15 +54,15 @@ class TaskStore:
     def save(self, record: TaskRecord) -> None:
         raise NotImplementedError
 
-    def get(self, task_id: str) -> Optional[TaskRecord]:
+    def get(self, task_id: str) -> TaskRecord | None:
         raise NotImplementedError
 
     def list(
         self,
-        tenant_id: Optional[str] = None,
-        status: Optional[str] = None,
+        tenant_id: str | None = None,
+        status: str | None = None,
         limit: int = 100,
-    ) -> List[TaskRecord]:
+    ) -> list[TaskRecord]:
         raise NotImplementedError
 
     def delete(self, task_id: str) -> bool:
@@ -76,20 +76,20 @@ class TaskStore:
 
 class InMemoryTaskStore(TaskStore):
     def __init__(self):
-        self._store: Dict[str, TaskRecord] = {}
+        self._store: dict[str, TaskRecord] = {}
 
     def save(self, record: TaskRecord) -> None:
         self._store[record.id] = record
 
-    def get(self, task_id: str) -> Optional[TaskRecord]:
+    def get(self, task_id: str) -> TaskRecord | None:
         return self._store.get(task_id)
 
     def list(
         self,
-        tenant_id: Optional[str] = None,
-        status: Optional[str] = None,
+        tenant_id: str | None = None,
+        status: str | None = None,
         limit: int = 100,
-    ) -> List[TaskRecord]:
+    ) -> list[TaskRecord]:
         out = list(self._store.values())
         if tenant_id:
             out = [r for r in out if r.tenant_id == tenant_id]
@@ -114,7 +114,7 @@ class PostgresTaskStore(TaskStore):
     or if connection fails.
     """
 
-    def __init__(self, url: str, fallback: Optional[TaskStore] = None):
+    def __init__(self, url: str, fallback: TaskStore | None = None):
         try:
             from sqlalchemy import create_engine, Column, String, DateTime, JSON, Text
             from sqlalchemy.orm import declarative_base, sessionmaker
@@ -182,7 +182,7 @@ class PostgresTaskStore(TaskStore):
             row.metadata_ = record.metadata
             session.commit()
 
-    def get(self, task_id: str) -> Optional[TaskRecord]:
+    def get(self, task_id: str) -> TaskRecord | None:
         if self._engine is None:
             return self._fallback.get(task_id)
         with self._SessionLocal() as session:
@@ -193,10 +193,10 @@ class PostgresTaskStore(TaskStore):
 
     def list(
         self,
-        tenant_id: Optional[str] = None,
-        status: Optional[str] = None,
+        tenant_id: str | None = None,
+        status: str | None = None,
         limit: int = 100,
-    ) -> List[TaskRecord]:
+    ) -> list[TaskRecord]:
         if self._engine is None:
             return self._fallback.list(tenant_id=tenant_id, status=status, limit=limit)
         from sqlalchemy import select
@@ -244,7 +244,7 @@ class PostgresTaskStore(TaskStore):
 # ── Factory ──
 
 def create_task_store(
-    postgres_url: Optional[str] = None,
+    postgres_url: str | None = None,
     force_in_memory: bool = False,
 ) -> TaskStore:
     """
@@ -258,7 +258,7 @@ def create_task_store(
 
 
 # Global default
-_default_store: Optional[TaskStore] = None
+_default_store: TaskStore | None = None
 
 
 def get_task_store() -> TaskStore:

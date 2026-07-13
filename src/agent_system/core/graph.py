@@ -21,11 +21,11 @@ logger = logging.getLogger(__name__)
 class GraphState(TypedDict):
     task_id: str
     input: str
-    config: Dict[str, Any]
-    agent_name: Optional[str]
-    output: Optional[Dict[str, Any]]
-    validation: Optional[Dict[str, Any]]
-    error: Optional[str]
+    config: dict[str, Any]
+    agent_name: str | None
+    output: dict[str, Any] | None
+    validation: dict[str, Any] | None
+    error: str | None
     status: Literal["pending", "running", "completed", "failed"]
 
 
@@ -103,8 +103,8 @@ def create_graph(agent: SmartAgent) -> StateGraph:
 def run_agent_sync(
     agent: SmartAgent,
     task_input: str,
-    task_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    task_id: str | None = None,
+) -> dict[str, Any]:
     """Synchronously run a single agent via LangGraph"""
     if task_id is None:
         task_id = OutputSchema.generate_id("task")
@@ -138,8 +138,8 @@ def run_agent_sync(
 async def run_agent_async(
     agent: SmartAgent,
     task_input: str,
-    task_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    task_id: str | None = None,
+) -> dict[str, Any]:
     """
     Truly async version of run_agent_sync — for use within an existing
     event loop (FastAPI, etc.). Does NOT call asyncio.run().

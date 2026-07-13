@@ -40,7 +40,7 @@ class TokenPayload(BaseModel):
     sub: str
     tenant_id: str = "default"
     role: str = "user"
-    scopes: List[str] = Field(default_factory=list)
+    scopes: list[str] = Field(default_factory=list)
     iat: int = 0
     exp: int = 0
 
@@ -65,14 +65,14 @@ class AuthService:
               (old key removed; rotation complete)
     """
 
-    def __init__(self, secret: Optional[str] = None, default_ttl: int = 3600):
+    def __init__(self, secret: str | None = None, default_ttl: int = 3600):
         # Resolve secrets: explicit arg > AUTH_SECRETS env > AUTH_SECRET env
         auth_secrets_env = os.environ.get("AUTH_SECRETS", "").strip()
         auth_secret_env = os.environ.get("AUTH_SECRET", "").strip()
 
         if secret:
             # Explicit single secret -> single-key store with kid="default"
-            self._secrets: List[Tuple[str, str]] = [("default", secret)]
+            self._secrets: list[tuple[str, str]] = [("default", secret)]
         elif auth_secrets_env:
             self._secrets = self._parse_auth_secrets(auth_secrets_env)
         elif auth_secret_env:
@@ -106,9 +106,9 @@ class AuthService:
         )
 
     @staticmethod
-    def _parse_auth_secrets(raw: str) -> List[Tuple[str, str]]:
+    def _parse_auth_secrets(raw: str) -> list[tuple[str, str]]:
         """Parse 'kid1:secret1,kid2:secret2' -> [('kid1','secret1'), ...]"""
-        result: List[Tuple[str, str]] = []
+        result: list[tuple[str, str]] = []
         for entry in raw.split(","):
             entry = entry.strip()
             if not entry:
@@ -131,7 +131,7 @@ class AuthService:
             raise ValueError("AUTH_SECRETS is empty")
         return result
 
-    def get_keys_for_rotation(self) -> List[Tuple[str, str]]:
+    def get_keys_for_rotation(self) -> list[tuple[str, str]]:
         """Return all (kid, secret) pairs — for ops/audit."""
         return list(self._secrets)
 
@@ -140,8 +140,8 @@ class AuthService:
         user_id: str,
         tenant_id: str = "default",
         role: str = "user",
-        scopes: Optional[List[str]] = None,
-        ttl: Optional[int] = None,
+        scopes: list[str] | None = None,
+        ttl: int | None = None,
     ) -> str:
         now = int(time.time())
         payload = {
@@ -155,7 +155,7 @@ class AuthService:
         }
         return jwt.encode(payload, self.current_secret, algorithm=self.algorithm)
 
-    def verify_token(self, token: str) -> Optional[TokenPayload]:
+    def verify_token(self, token: str) -> TokenPayload | None:
         # Peek at the kid in the (unverified) claims to pick the right key.
         # We store `kid` in the claims payload (not the JWS header) so
         # jwt.get_unverified_claims is the right accessor.
@@ -206,10 +206,10 @@ def _role_from_str(s: str) -> GlobalRole:
 
 # ── Context-aware user access ──
 
-_current_user: ContextVar[Optional[User]] = ContextVar("_current_user", default=None)
+_current_user: ContextVar[User | None] = ContextVar("_current_user", default=None)
 
 
-def set_current_user(user: Optional[User]) -> object:
+def set_current_user(user: User | None) -> object:
     return _current_user.set(user)
 
 
@@ -217,13 +217,13 @@ def reset_current_user(token: object) -> None:
     _current_user.reset(token)
 
 
-def get_current_user() -> Optional[User]:
+def get_current_user() -> User | None:
     return _current_user.get()
 
 
 # ── FastAPI dependencies ──
 
-def _extract_bearer(authorization: Optional[str]) -> Optional[str]:
+def _extract_bearer(authorization: str | None) -> str | None:
     if not authorization:
         return None
     if authorization.lower().startswith("bearer "):
@@ -231,12 +231,12 @@ def _extract_bearer(authorization: Optional[str]) -> Optional[str]:
     return authorization
 
 
-def require_auth(auth_service: Optional[AuthService] = None):
+def require_auth(auth_service: AuthService | None = None):
     """FastAPI dependency: require a valid Bearer token."""
     svc = auth_service or AuthService()
 
     def _dep(
-        authorization: Optional[str] = Header(default=None, alias="Authorization"),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> User:
         from fastapi import HTTPException
         token = _extract_bearer(authorization)
@@ -249,7 +249,7 @@ def require_auth(auth_service: Optional[AuthService] = None):
     return _dep
 
 
-def user_can(user: User, permission: Permission, rbac: Optional[RBAC] = None) -> bool:
+def user_can(user: User, permission: Permission, rbac: RBAC | None = None) -> bool:
     check_rbac = rbac or RBAC()
     return check_rbac.user_can(user, permission)
 
@@ -259,7 +259,7 @@ def user_can(user: User, permission: Permission, rbac: Optional[RBAC] = None) ->
 class AuthMiddleware:
     """Sets a TenantContext in the contextvar from the Authorization header."""
 
-    def __init__(self, app, auth_service: Optional[AuthService] = None):
+    def __init__(self, app, auth_service: AuthService | None = None):
         self.app = app
         self.auth_service = auth_service or AuthService()
 
@@ -302,7 +302,7 @@ class AuthMiddleware:
 
 
 # Global default
-_default_service: Optional[AuthService] = None
+_default_service: AuthService | None = None
 
 
 def get_auth_service() -> AuthService:

@@ -137,7 +137,7 @@ def _build_backend(args, prefix: str):
     return get_storage(backend, **kwargs)
 
 
-def main(argv: Optional[list] = None):
+def main(argv: list | None = None):
     parser = argparse.ArgumentParser(
         description="Migrate graph data between storage backends."
     )

@@ -28,7 +28,7 @@ class AgentEvent(BaseModel):
     agent_name: str
     task_id: str = ""
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    data: Dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
     severity: str = "info"  # info / warning / error / critical
 
 
@@ -42,7 +42,7 @@ class BaseMixin:
 
     agent_name: str = "base_agent"
     description: str = "Base agent"
-    agent_capabilities: List[str] = []
+    agent_capabilities: list[str] = []
 
     # Subclasses can override these to plug in their own implementations
     _event_bus: Any = None  # An object with `publish(event)` method
@@ -71,7 +71,7 @@ class BaseMixin:
         self,
         event_type: str,
         task_id: str = "",
-        data: Optional[Dict[str, Any]] = None,
+        data: dict[str, Any] | None = None,
         severity: str = "info",
     ):
         """Emit an event to the bus."""
@@ -92,7 +92,7 @@ class BaseMixin:
         self,
         event_type: str,
         task_id: str = "",
-        data: Optional[Dict[str, Any]] = None,
+        data: dict[str, Any] | None = None,
         severity: str = "info",
     ):
         """Synchronous event emission (when not in async context)."""

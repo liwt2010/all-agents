@@ -106,7 +106,7 @@ indent-style = "space"
 docstring-code-format = true
 
 [tool.mypy]
-# Advisory. Future tightening: move to strict=True per-module via overrides.
+# FIXED: Strict mode now enforced on core modules via overrides below.
 python_version = "3.11"
 mypy_path = "src"
 ignore_missing_imports = true
@@ -130,3 +130,27 @@ disallow_untyped_defs = false
 [[tool.mypy.overrides]]
 module = ["autogen_agentchat.*", "autogen_ext.*", "langchain.*", "langgraph.*"]
 ignore_missing_imports = true
+
+# FIXED: Strict type checking on core modules (Phase 1)
+# These modules MUST have type annotations - no more implicit Any
+[[tool.mypy.overrides]]
+module = "agent_system.core.*"
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_return_any = true
+disallow_any_generics = true
+
+[[tool.mypy.overrides]]
+module = "agent_system.memory.*"
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_return_any = true
+disallow_any_generics = true
+
+[[tool.mypy.overrides]]
+module = "agent_system.storage.*"
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_return_any = true
+"**/__init__.py" = ["F401", "F403"]
+

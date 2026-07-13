@@ -167,7 +167,7 @@ class SQLiteBackend:
             )
             conn.commit()
 
-    def load_node(self, node_id: str) -> Optional[GraphNode]:
+    def load_node(self, node_id: str) -> GraphNode | None:
         row = self._conn().execute(
             "SELECT * FROM graph_nodes WHERE id = ?", (node_id,)
         ).fetchone()
@@ -183,7 +183,7 @@ class SQLiteBackend:
             conn.commit()
             return cur.rowcount > 0
 
-    def list_nodes(self, node_type: Optional[NodeType] = None) -> List[GraphNode]:
+    def list_nodes(self, node_type: NodeType | None = None) -> list[GraphNode]:
         if node_type:
             rows = self._conn().execute(
                 "SELECT * FROM graph_nodes WHERE type = ?", (node_type.value,)
@@ -221,8 +221,8 @@ class SQLiteBackend:
         self,
         node_id: str,
         direction: str = "out",
-        link_type: Optional[str] = None,
-    ) -> List[GraphLink]:
+        link_type: str | None = None,
+    ) -> list[GraphLink]:
         conn = self._conn()
         if direction == "out":
             sql = "SELECT * FROM graph_links WHERE source_id = ?"

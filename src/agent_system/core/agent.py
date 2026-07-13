@@ -46,7 +46,7 @@ class AgentEvent(BaseModel):
     agent_name: str
     task_id: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    data: Dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class ErrorLevel(str, Enum):
@@ -59,18 +59,18 @@ class ErrorLevel(str, Enum):
 class AgentError(BaseModel):
     level: ErrorLevel
     message: str
-    details: Dict[str, Any] = Field(default_factory=dict)
-    exception: Optional[str] = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    exception: str | None = None
 
 
 class TaskContext(BaseModel):
     task_id: str
     input: str
-    config: Dict[str, Any] = Field(default_factory=dict)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    upstream_output: Optional[Dict[str, Any]] = None  # output from prev agent
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    config: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    upstream_output: dict[str, Any] | None = None  # output from prev agent
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     retry_count: int = 0
     max_retries: int = 3
 
@@ -79,7 +79,7 @@ class EventHandler:
     """Publish/subscribe event bus"""
 
     def __init__(self):
-        self._handlers: Dict[EventType, List[Callable]] = {}
+        self._handlers: dict[EventType, list[Callable]] = {}
 
     def subscribe(self, event_type: EventType, handler: Callable):
         if event_type not in self._handlers:
@@ -302,7 +302,7 @@ Begin."""
         Loop up to max_retries+1 times. Returns OutputSchema on success.
         Raises Exception (with .message attribute) on final failure.
         """
-        last_error: Optional[AgentError] = None
+        last_error: AgentError | None = None
         for attempt in range(task.max_retries + 1):
             task.retry_count = attempt
             try:
@@ -472,7 +472,7 @@ Begin."""
 
     # ── Helpers ──────────────────────────────────────────────────
 
-    async def _publish_event(self, event_type: EventType, task: TaskContext, data: Dict[str, Any]) -> None:
+    async def _publish_event(self, event_type: EventType, task: TaskContext, data: dict[str, Any]) -> None:
         """Thin wrapper around event_bus.publish for type-safe events."""
         await event_bus.publish(AgentEvent(
             event_type=event_type,

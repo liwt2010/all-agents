@@ -216,7 +216,7 @@ def track_llm(model: str = "unknown", provider: str = "unknown") -> Callable:
     return decorator
 
 
-def _extract_usage(result: Any) -> Optional[dict]:
+def _extract_usage(result: Any) -> dict | None:
     """Extract token usage from common LLM result shapes (OpenAI / Anthropic / DeepSeek)."""
     if result is None:
         return None

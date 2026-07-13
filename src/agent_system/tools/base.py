@@ -22,18 +22,18 @@ class ToolDefinition(BaseModel):
     """Tool metadata for LLM tool calling"""
     name: str
     description: str
-    input_schema: Dict[str, Any]
+    input_schema: dict[str, Any]
 
 
 class ToolResult(BaseModel):
     """Tool execution result"""
     success: bool
     output: Any = None
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # Global tool registry
-_tool_classes: Dict[str, Type["Tool"]] = {}
+_tool_classes: dict[str, type["Tool"]] = {}
 
 
 def register(cls):
@@ -64,10 +64,10 @@ class Tool(ABC):
 
     name: str = ""
     description: str = ""
-    input_schema: Dict[str, Any] = {}
+    input_schema: dict[str, Any] = {}
 
     @abstractmethod
-    async def execute(self, inputs: Dict[str, Any]) -> ToolResult:
+    async def execute(self, inputs: dict[str, Any]) -> ToolResult:
         ...
 
     def to_definition(self) -> ToolDefinition:
@@ -82,27 +82,27 @@ class ToolRegistry:
     """Runtime tool registry — manages loaded tool instances"""
 
     def __init__(self):
-        self._tools: Dict[str, Tool] = {}
+        self._tools: dict[str, Tool] = {}
 
     def register(self, tool: Tool):
         self._tools[tool.name] = tool
 
-    def get(self, name: str) -> Optional[Tool]:
+    def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
 
-    def list_definitions(self) -> List[ToolDefinition]:
+    def list_definitions(self) -> list[ToolDefinition]:
         return [t.to_definition() for t in self._tools.values()]
 
-    def get_names(self) -> List[str]:
+    def get_names(self) -> list[str]:
         return list(self._tools.keys())
 
-    async def execute(self, name: str, inputs: Dict[str, Any]) -> ToolResult:
+    async def execute(self, name: str, inputs: dict[str, Any]) -> ToolResult:
         tool = self.get(name)
         if tool is None:
             return ToolResult(success=False, error=f"Unknown tool: {name}")
         return await tool.execute(inputs)
 
-    def to_openai_tools(self) -> List[Dict[str, Any]]:
+    def to_openai_tools(self) -> list[dict[str, Any]]:
         """Convert to OpenAI/Claude function-calling format"""
         return [
             {
@@ -117,7 +117,7 @@ class ToolRegistry:
         ]
 
 
-def discover_tools(tools_dir: Optional[str] = None) -> ToolRegistry:
+def discover_tools(tools_dir: str | None = None) -> ToolRegistry:
     """Auto-discover all @register-decorated tools from a directory.
 
     Scans all .py files in tools_dir (default: same directory as this file),
@@ -152,7 +152,7 @@ def discover_tools(tools_dir: Optional[str] = None) -> ToolRegistry:
     return registry
 
 
-def filter_registry(registry: ToolRegistry, enabled_names: List[str]) -> ToolRegistry:
+def filter_registry(registry: ToolRegistry, enabled_names: list[str]) -> ToolRegistry:
     """Filter registry to only include enabled tools"""
     filtered = ToolRegistry()
     for name in enabled_names:

@@ -46,13 +46,13 @@ class MCPClient:
             await client.disconnect()
     """
 
-    def __init__(self, server_name: str, command: str, args: Optional[List[str]] = None,
-                 env: Optional[Dict[str, str]] = None):
+    def __init__(self, server_name: str, command: str, args: list[str] | None = None,
+                 env: dict[str, str] | None = None):
         self.server_name = server_name
         self.command = command
         self.args = args or []
         self.env = env or {}
-        self._stack: Optional[AsyncExitStack] = None
+        self._stack: AsyncExitStack | None = None
         self._session = None
         self._stdio_ctx = None
         self._connected = False
@@ -92,7 +92,7 @@ class MCPClient:
         self._session = None
         self._connected = False
 
-    async def list_tools(self) -> List[Dict[str, Any]]:
+    async def list_tools(self) -> list[dict[str, Any]]:
         """Return list of available tools: [{name, description, inputSchema}]"""
         if not self._connected or not self._session:
             return []
@@ -106,7 +106,7 @@ class MCPClient:
             for t in result.tools
         ]
 
-    async def call_tool(self, name: str, arguments: Dict[str, Any]) -> Any:
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         """Invoke a tool by name and return its content."""
         if not self._connected or not self._session:
             raise RuntimeError(f"MCP client {self.server_name} not connected")
@@ -114,7 +114,7 @@ class MCPClient:
         # result.content is a list of TextContent / ImageContent / etc.
         return [c.model_dump() if hasattr(c, "model_dump") else c for c in result.content]
 
-    async def list_resources(self) -> List[Dict[str, Any]]:
+    async def list_resources(self) -> list[dict[str, Any]]:
         if not self._connected or not self._session:
             return []
         try:
@@ -133,14 +133,14 @@ class MCPClient:
 class MCPToolWrapper(Tool):
     """Wraps a remote MCP tool as a local Tool."""
 
-    def __init__(self, client: MCPClient, tool_def: Dict[str, Any]):
+    def __init__(self, client: MCPClient, tool_def: dict[str, Any]):
         self._client = client
         self._tool_def = tool_def
         self.name = tool_def["name"]
         self.description = tool_def.get("description", "")
         self.input_schema = tool_def.get("input_schema", {})
 
-    async def execute(self, inputs: Dict[str, Any]) -> ToolResult:
+    async def execute(self, inputs: dict[str, Any]) -> ToolResult:
         try:
             content = await self._client.call_tool(self.name, inputs)
             return ToolResult(success=True, output=content)
@@ -155,8 +155,8 @@ class MCPServerSpec(BaseModel):
     """Configuration for one MCP server."""
     name: str
     command: str
-    args: List[str] = Field(default_factory=list)
-    env: Dict[str, str] = Field(default_factory=dict)
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
     enabled: bool = True
     eager: bool = True  # discover tools at startup vs lazy on first use
 
@@ -167,9 +167,9 @@ class MCPServerManager:
     """
 
     def __init__(self):
-        self._clients: Dict[str, MCPClient] = {}
-        self._tool_to_client: Dict[str, str] = {}
-        self._registered_tools: Dict[str, MCPToolWrapper] = {}
+        self._clients: dict[str, MCPClient] = {}
+        self._tool_to_client: dict[str, str] = {}
+        self._registered_tools: dict[str, MCPToolWrapper] = {}
         self._eager_done: set = set()
 
     def add_server(self, spec: MCPServerSpec) -> MCPClient:
@@ -192,7 +192,7 @@ class MCPServerManager:
             await client.connect()
         return client
 
-    async def connect_all(self, specs: List[MCPServerSpec]) -> List[Dict[str, Any]]:
+    async def connect_all(self, specs: list[MCPServerSpec]) -> list[dict[str, Any]]:
         """Connect all enabled servers. Returns discovery results."""
         results = []
         for spec in specs:
@@ -233,7 +233,7 @@ class MCPServerManager:
             self._tool_to_client[t["name"]] = server_name
             logger.info(f"Registered MCP tool: {server_name}/{t['name']}")
 
-    async def get_tool(self, name: str) -> Optional[MCPToolWrapper]:
+    async def get_tool(self, name: str) -> MCPToolWrapper | None:
         """Get a tool, lazily loading if needed."""
         if name in self._registered_tools:
             return self._registered_tools[name]
@@ -250,16 +250,16 @@ class MCPServerManager:
                 continue
         return self._registered_tools.get(name)
 
-    def get_registered_tool_names(self) -> List[str]:
+    def get_registered_tool_names(self) -> list[str]:
         return list(self._registered_tools.keys())
 
-    def list_servers(self) -> List[str]:
+    def list_servers(self) -> list[str]:
         return list(self._clients.keys())
 
 
 # ── Singleton ──
 
-_default_manager: Optional[MCPServerManager] = None
+_default_manager: MCPServerManager | None = None
 
 
 def get_mcp_manager() -> MCPServerManager:

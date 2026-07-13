@@ -21,12 +21,12 @@ class Span:
     name: str
     trace_id: str
     span_id: str
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     start_time: float = 0.0
     end_time: float = 0.0
-    attributes: Dict[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict)
     status: str = "ok"  # ok / error
-    events: List[Dict[str, Any]] = field(default_factory=list)
+    events: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def duration_ms(self) -> float:
@@ -42,11 +42,11 @@ class Tracer:
     """
 
     def __init__(self):
-        self._spans: List[Span] = []
-        self._current: List[Span] = []  # stack of active spans
+        self._spans: list[Span] = []
+        self._current: list[Span] = []  # stack of active spans
         self._max_spans = 1000
 
-    def _new_span(self, name: str, attributes: Optional[Dict] = None) -> Span:
+    def _new_span(self, name: str, attributes: dict | None = None) -> Span:
         parent_id = self._current[-1].span_id if self._current else None
         trace_id = self._current[0].trace_id if self._current else uuid.uuid4().hex
         span_id = uuid.uuid4().hex[:16]
@@ -60,7 +60,7 @@ class Tracer:
         )
 
     @contextmanager
-    def start_span(self, name: str, attributes: Optional[Dict] = None):
+    def start_span(self, name: str, attributes: dict | None = None):
         """Synchronous span context manager."""
         span = self._new_span(name, attributes)
         self._current.append(span)
@@ -78,7 +78,7 @@ class Tracer:
                 self._spans = self._spans[-self._max_spans:]
 
     @asynccontextmanager
-    async def astart_span(self, name: str, attributes: Optional[Dict] = None):
+    async def astart_span(self, name: str, attributes: dict | None = None):
         """Async span context manager."""
         span = self._new_span(name, attributes)
         self._current.append(span)
@@ -95,13 +95,13 @@ class Tracer:
             if len(self._spans) > self._max_spans:
                 self._spans = self._spans[-self._max_spans:]
 
-    def get_recent_spans(self, limit: int = 100) -> List[Span]:
+    def get_recent_spans(self, limit: int = 100) -> list[Span]:
         return self._spans[-limit:]
 
-    def get_spans_by_trace(self, trace_id: str) -> List[Span]:
+    def get_spans_by_trace(self, trace_id: str) -> list[Span]:
         return [s for s in self._spans if s.trace_id == trace_id]
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         durations = [s.duration_ms for s in self._spans if s.duration_ms]
         errors = sum(1 for s in self._spans if s.status == "error")
         return {
@@ -116,7 +116,7 @@ class Tracer:
 
 
 # Singleton tracer
-_tracer: Optional[Tracer] = None
+_tracer: Tracer | None = None
 
 
 def get_tracer() -> Tracer:

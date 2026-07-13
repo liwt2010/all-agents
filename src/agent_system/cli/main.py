@@ -24,7 +24,7 @@ app = typer.Typer(help="企业级多 Agent 协作平台")
 def run(
     task: str = typer.Argument(..., help="任务描述"),
     agent: str = typer.Option("product", "--agent", "-a", help="使用的 Agent"),
-    output: Optional[str] = typer.Option(None, "--output", "-o", help="输出文件路径"),
+    output: str | None = typer.Option(None, "--output", "-o", help="输出文件路径"),
     json_output: bool = typer.Option(False, "--json", "-j", help="JSON 格式输出"),
 ):
     """运行单个 Agent 任务"""

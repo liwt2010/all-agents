@@ -56,7 +56,7 @@ class Tenant(BaseModel):
     plan: str = "free"             # free / pro / enterprise
     status: str = "active"         # active / suspended / trial
     isolation_mode: str = "schema"  # schema (logical) / db (physical)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── Group (project / department) ──
@@ -67,10 +67,10 @@ class Group(BaseModel):
     tenant_id: str
     name: str
     group_type: str = "project"  # project / department / custom
-    parent_group_id: Optional[str] = None  # for hierarchy
+    parent_group_id: str | None = None  # for hierarchy
     visibility: str = "private"  # private / public-within-tenant
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── PermissionGroup (admin / member / viewer) ──
@@ -79,10 +79,10 @@ class PermissionGroup(BaseModel):
     """A role-based permission group within a group/tenant."""
     id: str
     tenant_id: str
-    group_id: Optional[str] = None   # which group this is scoped to (None = tenant-wide)
+    group_id: str | None = None   # which group this is scoped to (None = tenant-wide)
     name: str                       # "admins" / "members" / "viewers"
     role: GlobalRole = GlobalRole.USER
-    permissions: List[Permission] = Field(default_factory=list)
+    permissions: list[Permission] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -95,21 +95,21 @@ class User(BaseModel):
     email: str = ""
     display_name: str = ""
     global_role: GlobalRole = GlobalRole.USER
-    group_ids: List[str] = Field(default_factory=list)
-    perm_group_ids: List[str] = Field(default_factory=list)
-    project_ids: List[str] = Field(default_factory=list)
+    group_ids: list[str] = Field(default_factory=list)
+    perm_group_ids: list[str] = Field(default_factory=list)
+    project_ids: list[str] = Field(default_factory=list)
     is_agent: bool = False
     status: str = "active"  # active / invited / suspended / disabled
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    last_active_at: Optional[datetime] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    last_active_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── RBAC matrix ──
 
 # Maps (global_role, resource_action) -> allowed
 # This is the default matrix; tenants can override via PermissionGroup.
-DEFAULT_RBAC: Dict[GlobalRole, Set[Permission]] = {
+DEFAULT_RBAC: dict[GlobalRole, set[Permission]] = {
     GlobalRole.PLATFORM_ADMIN: {
         Permission.READ, Permission.WRITE, Permission.DELETE,
         Permission.ADMIN, Permission.AUDIT, Permission.EXPORT, Permission.INVITE,
@@ -143,14 +143,14 @@ class RBAC:
     take on a given resource type.
     """
 
-    def __init__(self, custom_matrix: Optional[Dict[GlobalRole, Set[Permission]]] = None):
+    def __init__(self, custom_matrix: dict[GlobalRole, set[Permission]] | None = None):
         self.matrix = custom_matrix or {k: set(v) for k, v in DEFAULT_RBAC.items()}
 
     def role_can(self, role: GlobalRole, permission: Permission) -> bool:
         """Check if a role has a permission"""
         return permission in self.matrix.get(role, set())
 
-    def user_permissions(self, user: User) -> Set[Permission]:
+    def user_permissions(self, user: User) -> set[Permission]:
         """Aggregate permissions from user's role and perm groups."""
         perms = set(self.matrix.get(user.global_role, set()))
 
@@ -184,30 +184,30 @@ class RBAC:
 
 
 # In-memory stores (placeholder; production = Postgres / SQL)
-_tenant_store: Dict[str, Tenant] = {}
-_user_store: Dict[str, User] = {}
-_group_store: Dict[str, Group] = {}
-_perm_group_store: Dict[str, PermissionGroup] = {}
+_tenant_store: dict[str, Tenant] = {}
+_user_store: dict[str, User] = {}
+_group_store: dict[str, Group] = {}
+_perm_group_store: dict[str, PermissionGroup] = {}
 
 
 class TenantStore:
     """In-memory CRUD for tenants, users, groups, permission groups."""
 
     def __init__(self):
-        self.tenants: Dict[str, Tenant] = {}
-        self.users: Dict[str, User] = {}
-        self.groups: Dict[str, Group] = {}
-        self.perm_groups: Dict[str, PermissionGroup] = {}
+        self.tenants: dict[str, Tenant] = {}
+        self.users: dict[str, User] = {}
+        self.groups: dict[str, Group] = {}
+        self.perm_groups: dict[str, PermissionGroup] = {}
 
     # ── Tenants ──
     def create_tenant(self, tenant: Tenant) -> Tenant:
         self.tenants[tenant.id] = tenant
         return tenant
 
-    def get_tenant(self, tenant_id: str) -> Optional[Tenant]:
+    def get_tenant(self, tenant_id: str) -> Tenant | None:
         return self.tenants.get(tenant_id)
 
-    def list_tenants(self) -> List[Tenant]:
+    def list_tenants(self) -> list[Tenant]:
         return list(self.tenants.values())
 
     # ── Users ──
@@ -215,10 +215,10 @@ class TenantStore:
         self.users[user.id] = user
         return user
 
-    def get_user(self, user_id: str) -> Optional[User]:
+    def get_user(self, user_id: str) -> User | None:
         return self.users.get(user_id)
 
-    def list_users(self, tenant_id: Optional[str] = None) -> List[User]:
+    def list_users(self, tenant_id: str | None = None) -> list[User]:
         users = list(self.users.values())
         if tenant_id:
             users = [u for u in users if u.tenant_id == tenant_id]
@@ -229,10 +229,10 @@ class TenantStore:
         self.groups[group.id] = group
         return group
 
-    def get_group(self, group_id: str) -> Optional[Group]:
+    def get_group(self, group_id: str) -> Group | None:
         return self.groups.get(group_id)
 
-    def list_groups(self, tenant_id: Optional[str] = None) -> List[Group]:
+    def list_groups(self, tenant_id: str | None = None) -> list[Group]:
         groups = list(self.groups.values())
         if tenant_id:
             groups = [g for g in groups if g.tenant_id == tenant_id]
@@ -243,10 +243,10 @@ class TenantStore:
         self.perm_groups[pg.id] = pg
         return pg
 
-    def get_perm_group(self, pg_id: str) -> Optional[PermissionGroup]:
+    def get_perm_group(self, pg_id: str) -> PermissionGroup | None:
         return self.perm_groups.get(pg_id)
 
-    def list_perm_groups(self, tenant_id: Optional[str] = None) -> List[PermissionGroup]:
+    def list_perm_groups(self, tenant_id: str | None = None) -> list[PermissionGroup]:
         pgs = list(self.perm_groups.values())
         if tenant_id:
             pgs = [p for p in pgs if p.tenant_id == tenant_id]
@@ -254,7 +254,7 @@ class TenantStore:
 
 
 # Default global store
-_default_store: Optional[TenantStore] = None
+_default_store: TenantStore | None = None
 
 
 def get_tenant_store() -> TenantStore:

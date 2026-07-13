@@ -46,11 +46,11 @@ _service_name: str = "agent-system"
 
 
 def init_otel_exporter(
-    enabled: Optional[bool] = None,
-    exporter: Optional[str] = None,
-    service_name: Optional[str] = None,
-    sample_rate: Optional[float] = None,
-    endpoint: Optional[str] = None,
+    enabled: bool | None = None,
+    exporter: str | None = None,
+    service_name: str | None = None,
+    sample_rate: float | None = None,
+    endpoint: str | None = None,
 ) -> bool:
     """
     Initialize the OTel exporter. Idempotent. Returns True if enabled.

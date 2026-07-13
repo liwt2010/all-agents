@@ -46,7 +46,7 @@ class Event(BaseModel):
     source: str  # agent name or system component
     severity: EventSeverity = EventSeverity.INFO
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    data: Dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
     trace_id: str = ""
     tenant_id: str = "default"
 
@@ -60,10 +60,10 @@ class Event(BaseModel):
 class EventSubscription(BaseModel):
     """A registered event handler"""
     id: str
-    event_name: Optional[str] = None  # None = all events
-    category: Optional[EventCategory] = None
-    source: Optional[str] = None
-    severity_min: Optional[EventSeverity] = None
+    event_name: str | None = None  # None = all events
+    category: EventCategory | None = None
+    source: str | None = None
+    severity_min: EventSeverity | None = None
     handler: Any = None  # Callable[[Event], None] or Callable[[Event], Awaitable[None]]
 
 
@@ -95,9 +95,9 @@ class EventBus:
     """
 
     def __init__(self):
-        self._subscriptions: List[EventSubscription] = []
+        self._subscriptions: list[EventSubscription] = []
         self._sub_counter: int = 0
-        self._log_writer: Optional[EventLogWriter] = None
+        self._log_writer: EventLogWriter | None = None
 
     def enable_logging(self, log_dir: str = "data/events"):
         """Enable event persistence to disk"""
@@ -106,10 +106,10 @@ class EventBus:
     def subscribe(
         self,
         handler: Callable,
-        event_name: Optional[str] = None,
-        category: Optional[EventCategory] = None,
-        source: Optional[str] = None,
-        severity_min: Optional[EventSeverity] = None,
+        event_name: str | None = None,
+        category: EventCategory | None = None,
+        source: str | None = None,
+        severity_min: EventSeverity | None = None,
     ) -> str:
         """Register an event handler. Returns subscription ID for unsubscribe."""
         self._sub_counter += 1
@@ -186,7 +186,7 @@ event_bus = EventBus()
 
 def subscribe_to_agent_events(
     handler: Callable,
-    agent_name: Optional[str] = None,
+    agent_name: str | None = None,
 ) -> str:
     """Convenience: subscribe to all agent lifecycle events"""
     return event_bus.subscribe(
@@ -222,7 +222,7 @@ def make_event(
     category: EventCategory,
     name: str,
     source: str,
-    data: Optional[Dict[str, Any]] = None,
+    data: dict[str, Any] | None = None,
     severity: EventSeverity = EventSeverity.INFO,
     trace_id: str = "",
     tenant_id: str = "default",

@@ -20,17 +20,17 @@ class LLMConfig(BaseModel):
 class AgentLLMConfig(BaseModel):
     default: LLMConfig = LLMConfig()
     fast: LLMConfig = LLMConfig(model="claude-haiku-4-5-20251001", max_tokens=2048, temperature=0.3)
-    agents: Dict[str, LLMConfig] = {}
+    agents: dict[str, LLMConfig] = {}
 
 
 class ToolConfig(BaseModel):
     enabled: list[str] = []
-    config: Dict[str, Dict[str, Any]] = {}
+    config: dict[str, dict[str, Any]] = {}
 
 
 class GraphConfig(BaseModel):
     max_retries: int = 3
-    timeout: Dict[str, int] = {
+    timeout: dict[str, int] = {
         "quick": 60,
         "standard": 300,
         "complex": 1800,
@@ -53,13 +53,13 @@ class MemoryConfig(BaseModel):
 
 
 class SystemConfig(BaseSettings):
-    system: Dict[str, str] = {
+    system: dict[str, str] = {
         "name": "Agent System",
         "version": "0.1.0",
         "environment": "development",
     }
     llm: AgentLLMConfig = AgentLLMConfig()
-    mcp_servers: Dict[str, Dict[str, Any]] = {}
+    mcp_servers: dict[str, dict[str, Any]] = {}
     tools: ToolConfig = ToolConfig()
     graph: GraphConfig = GraphConfig()
     memory: MemoryConfig = MemoryConfig()
@@ -67,7 +67,7 @@ class SystemConfig(BaseSettings):
     model_config = {"arbitrary_types_allowed": True}
 
     @classmethod
-    def from_yaml(cls, path: Optional[str] = None) -> "SystemConfig":
+    def from_yaml(cls, path: str | None = None) -> "SystemConfig":
         """从 YAML 文件加载配置"""
         if path is None:
             path = os.environ.get(
@@ -87,7 +87,7 @@ class SystemConfig(BaseSettings):
 
 
 # 全局单例
-_settings: Optional[SystemConfig] = None
+_settings: SystemConfig | None = None
 
 
 def get_settings() -> SystemConfig:

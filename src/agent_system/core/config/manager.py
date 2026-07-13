@@ -33,7 +33,7 @@ class SecretStore:
     Manager, or a simple file-based store for dev.
     """
 
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> str | None:
         raise NotImplementedError
 
     def set(self, key: str, value: str) -> bool:
@@ -49,7 +49,7 @@ class FileSecretStore(SecretStore):
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> str | None:
         path = self.base_dir / f"{key}.secret"
         if path.exists():
             return path.read_text(encoding="utf-8").strip()
@@ -81,7 +81,7 @@ class FileConfigStore:
     def __init__(self, base_dir: str = "config"):
         self.base_dir = Path(base_dir)
 
-    def get(self, key: str, tenant_id: str = "default", group_id: str = "", agent_name: str = "") -> Optional[Any]:
+    def get(self, key: str, tenant_id: str = "default", group_id: str = "", agent_name: str = "") -> Any | None:
         """
         Get a value with the 4-layer override applied.
         Note: this method only handles the file layer (L4). The full
@@ -127,11 +127,11 @@ class ConfigManager:
 
     def __init__(
         self,
-        secret_store: Optional[SecretStore] = None,
-        file_store: Optional[FileConfigStore] = None,
+        secret_store: SecretStore | None = None,
+        file_store: FileConfigStore | None = None,
     ):
-        self.cache: Dict[str, Any] = {}
-        self.subscribers: List[Callable[[str, Any], None]] = []
+        self.cache: dict[str, Any] = {}
+        self.subscribers: list[Callable[[str, Any], None]] = []
         self.secret_store = secret_store
         self.file_store = file_store or FileConfigStore()
 
@@ -214,7 +214,7 @@ class ConfigManager:
 
 
 # Global default
-_default_manager: Optional[ConfigManager] = None
+_default_manager: ConfigManager | None = None
 
 
 def get_config_manager() -> ConfigManager:

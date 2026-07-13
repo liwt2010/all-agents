@@ -49,8 +49,8 @@ class HealthCheck(BaseModel):
 class RollbackPlan(BaseModel):
     """How to roll back if the deploy fails."""
     auto_rollback: bool = True
-    trigger_conditions: List[str] = Field(default_factory=list)  # e.g. "error_rate > 5%"
-    steps: List[str] = Field(default_factory=list)
+    trigger_conditions: list[str] = Field(default_factory=list)  # e.g. "error_rate > 5%"
+    steps: list[str] = Field(default_factory=list)
     max_rollback_time_seconds: int = 600
 
 
@@ -70,7 +70,7 @@ class DeployAgent(SmartAgent):
     ]
     description: str = "Plans and executes deployments across environments with safe rollout and rollback"
 
-    def _mock_deploy_plan(self, task: TaskContext, upstream: Dict[str, Any]) -> Dict[str, Any]:
+    def _mock_deploy_plan(self, task: TaskContext, upstream: dict[str, Any]) -> dict[str, Any]:
         """Deterministic deploy plan used when no LLM API key is set."""
         env_chain = ["dev", "staging", "prod"]
         targets = [

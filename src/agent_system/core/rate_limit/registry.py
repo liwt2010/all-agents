@@ -30,7 +30,7 @@ class ScopeConfig:
 
 
 # Default scope configurations
-DEFAULT_SCOPES: Dict[str, ScopeConfig] = {
+DEFAULT_SCOPES: dict[str, ScopeConfig] = {
     # Read-mostly endpoints
     "default": ScopeConfig(user_limit=120, ip_limit=240),
     # LLM-calling endpoints — strict
@@ -53,7 +53,7 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
-def load_scope_config_from_env() -> Dict[str, ScopeConfig]:
+def load_scope_config_from_env() -> dict[str, ScopeConfig]:
     """Build scope configs from environment variables (with defaults)."""
     return {
         "default": ScopeConfig(
@@ -103,10 +103,10 @@ class LimiterRegistry:
       - ip:{ip}:{scope}
     """
 
-    def __init__(self, scopes: Optional[Dict[str, ScopeConfig]] = None):
+    def __init__(self, scopes: dict[str, ScopeConfig] | None = None):
         self.scopes = scopes or load_scope_config_from_env()
-        self._user_limiters: Dict[str, SlidingWindowLimiter] = {}
-        self._ip_limiters: Dict[str, SlidingWindowLimiter] = {}
+        self._user_limiters: dict[str, SlidingWindowLimiter] = {}
+        self._ip_limiters: dict[str, SlidingWindowLimiter] = {}
 
     def _get_user_limiter(self, scope: str) -> SlidingWindowLimiter:
         if scope not in self._user_limiters:
@@ -129,7 +129,7 @@ class LimiterRegistry:
         return self._ip_limiters[scope]
 
     def check_request(
-        self, user_id: Optional[str], ip: str, scope: str
+        self, user_id: str | None, ip: str, scope: str
     ) -> tuple[bool, LimitDecision, str]:
         """
         Check all applicable limiters. Returns (allowed, decision, dimension).
@@ -163,7 +163,7 @@ class LimiterRegistry:
 
 
 # Global singleton
-_registry: Optional[LimiterRegistry] = None
+_registry: LimiterRegistry | None = None
 
 
 def get_limiter_registry() -> LimiterRegistry:

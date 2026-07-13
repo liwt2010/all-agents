@@ -24,7 +24,7 @@ class NextStep(BaseModel):
     """下一步行动"""
     action: str
     agent: str
-    description: Optional[str] = None
+    description: str | None = None
 
 
 # Fields that MUST be present and non-empty (Tier 1 STRICT)
@@ -42,18 +42,18 @@ class OutputSchema(BaseModel):
     """产出物标准 Schema — 5 个必填字段 + 可选 auto-repair"""
     id: str = ""                              # tier 1 — auto-repairable if empty
     type: str = ""                            # tier 1 — STRICT (LLM must provide)
-    created_at: Optional[datetime] = None     # tier 1 — auto-repair to now()
+    created_at: datetime | None = None     # tier 1 — auto-repair to now()
     created_by: str = ""                      # tier 1 — auto-repair to agent_name
     schema_version: str = "1.0"              # tier 1 — defaults to 1.0
-    payload: Dict[str, Any] = Field(default_factory=dict)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    next_steps: List[NextStep] = Field(default_factory=list)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    next_steps: list[NextStep] = Field(default_factory=list)
 
     # PR-2.2: indicates whether the payload came from a successful JSON parse
     # or is a raw_output fallback. Used by downstream agents to decide
     # whether to treat the result as authoritative.
     partial: bool = False
-    validation_warnings: List[str] = Field(default_factory=list)
+    validation_warnings: list[str] = Field(default_factory=list)
 
     @field_validator("id", mode="before")
     @classmethod
@@ -90,9 +90,9 @@ class OutputSchema(BaseModel):
 class ValidationResult(BaseModel):
     """校验结果"""
     valid: bool
-    errors: List[str] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
-    repairs: List[str] = Field(default_factory=list)  # auto-repairs applied
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    repairs: list[str] = Field(default_factory=list)  # auto-repairs applied
 
 
 class SchemaValidator:
@@ -121,7 +121,7 @@ class SchemaValidator:
     MIN_PAYLOAD_FIELDS = 2
 
     def __init__(self):
-        self._validators: Dict[str, callable] = {}
+        self._validators: dict[str, callable] = {}
 
     def register(self, output_type: str, validator: callable):
         self._validators[output_type] = validator
@@ -129,7 +129,7 @@ class SchemaValidator:
     def validate_and_repair(
         self,
         output: OutputSchema,
-        agent_name: Optional[str] = None,
+        agent_name: str | None = None,
     ) -> tuple[OutputSchema, ValidationResult]:
         """
         Tiered validation + auto-repair.
@@ -137,9 +137,9 @@ class SchemaValidator:
         Returns (possibly-repaired output, ValidationResult).
         The output is mutated in-place AND returned for convenience.
         """
-        repairs: List[str] = []
-        warnings: List[str] = []
-        errors: List[str] = []
+        repairs: list[str] = []
+        warnings: list[str] = []
+        errors: list[str] = []
 
         # ── Tier 3: auto-repair missing fields ──
         if not output.id:
@@ -252,8 +252,8 @@ class FailureNodeLogger:
         agent_name: str,
         output: OutputSchema,
         result: ValidationResult,
-        raw_llm_text: Optional[str] = None,
-    ) -> Optional[str]:
+        raw_llm_text: str | None = None,
+    ) -> str | None:
         """
         Write a validation record to the graph. Returns the node id on success,
         None on failure (logged but not raised).
@@ -267,7 +267,7 @@ class FailureNodeLogger:
             graph = get_graph()
 
             node_id = OS.generate_id("validation")
-            payload: Dict[str, Any] = {
+            payload: dict[str, Any] = {
                 "task_id": task_id,
                 "agent_name": agent_name,
                 "valid": result.valid,

@@ -54,8 +54,8 @@ class AsyncTaskPool:
     async def map(
         self,
         fn: Callable[..., Awaitable[T]],
-        items: List[Any],
-    ) -> List[T]:
+        items: list[Any],
+    ) -> list[T]:
         """Apply fn to each item, with bounded concurrency."""
         coros = [fn(item) for item in items]
         return await asyncio.gather(
@@ -99,8 +99,8 @@ class LLMRateLimiter:
 
 # ── Global pool instances ──
 
-_default_task_pool: Optional[AsyncTaskPool] = None
-_default_llm_limiter: Optional[LLMRateLimiter] = None
+_default_task_pool: AsyncTaskPool | None = None
+_default_llm_limiter: LLMRateLimiter | None = None
 
 
 def get_task_pool(max_workers: int = 10) -> AsyncTaskPool:

@@ -55,9 +55,9 @@ class DiscussionContext(BaseModel):
     """Inputs to a discussion round."""
     task_id: str = "discussion"
     task_input: str
-    error: Optional[str] = None
-    capability_hint: Optional[str] = None
-    agent_capabilities: List[str] = Field(default_factory=list)
+    error: str | None = None
+    capability_hint: str | None = None
+    agent_capabilities: list[str] = Field(default_factory=list)
     max_participants: int = 3
     max_rounds: int = 1
     timeout_seconds: float = 30.0
@@ -88,18 +88,18 @@ class Consensus(BaseModel):
     actionable_suggestion: str
     confidence: float = 0.0           # 0-1, how clear the consensus is
     agreement_ratio: float = 0.0      # 0-1, how many peers agreed
-    dissenting_views: List[str] = Field(default_factory=list)
+    dissenting_views: list[str] = Field(default_factory=list)
 
 
 class DiscussionResult(BaseModel):
     """Output of one discussion round."""
     context: DiscussionContext
-    transcript: List[DiscussionMessage] = Field(default_factory=list)
-    consensus: Optional[Consensus] = None
+    transcript: list[DiscussionMessage] = Field(default_factory=list)
+    consensus: Consensus | None = None
     duration_seconds: float = 0.0
     timed_out: bool = False
     no_peers_available: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
     def successful(self) -> bool:
         return self.consensus is not None and self.consensus.confidence > 0
@@ -129,7 +129,7 @@ class TaskContextLike(BaseModel):
     """Minimal stand-in for TaskContext that the mixin needs."""
     task_id: str
     input: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── The Mixin ──
@@ -147,10 +147,10 @@ class DiscussionMixin:
 
     # Subclasses can override these
     agent_name: str = "agent"
-    agent_capabilities: List[str] = []
+    agent_capabilities: list[str] = []
 
     # Default peer registry — populated by SmartAgent or by the application
-    _peer_registry: Dict[str, PeerProvider] = {}
+    _peer_registry: dict[str, PeerProvider] = {}
 
     def register_peer(self, name: str, provider: PeerProvider, *, _class_level: bool = False):
         """Register a peer provider.
@@ -174,7 +174,7 @@ class DiscussionMixin:
         """Class-level peer registration."""
         cls._peer_registry[name] = provider
 
-    def _all_peers(self) -> Dict[str, PeerProvider]:
+    def _all_peers(self) -> dict[str, PeerProvider]:
         merged = dict(type(self)._peer_registry)
         merged.update(getattr(self, "_instance_peers", None) or {})
         return merged
@@ -258,7 +258,7 @@ class DiscussionMixin:
         result.duration_seconds = time.time() - start
         return result
 
-    def _select_peers(self, ctx: DiscussionContext) -> List[Tuple[str, PeerProvider]]:
+    def _select_peers(self, ctx: DiscussionContext) -> list[tuple[str, PeerProvider]]:
         all_peers = self._all_peers()
         if ctx.max_participants <= 0:
             return []
@@ -279,10 +279,10 @@ class DiscussionMixin:
 
     async def _gather_peer_perspectives(
         self,
-        peers: List[Tuple[str, PeerProvider]],
+        peers: list[tuple[str, PeerProvider]],
         ctx: DiscussionContext,
         result: DiscussionResult,
-    ) -> List[DiscussionMessage]:
+    ) -> list[DiscussionMessage]:
         """Ask each peer in parallel; each peer gets a bounded turn."""
         async def ask_one(peer_name: str, provider: PeerProvider) -> DiscussionMessage:
             peer_start = time.time()
@@ -348,7 +348,7 @@ class DiscussionMixin:
             return str(output.get("summary") or output.get("response") or output)[:500]
         return str(output)[:500]
 
-    def _synthesize(self, ctx: DiscussionContext, advisor_messages: List[DiscussionMessage]) -> str:
+    def _synthesize(self, ctx: DiscussionContext, advisor_messages: list[DiscussionMessage]) -> str:
         if not advisor_messages:
             return "No actionable input from peers."
         bullets = "\n".join(f"- {m.agent}: {m.message[:200]}" for m in advisor_messages)
@@ -359,7 +359,7 @@ class DiscussionMixin:
 
     def _extract_consensus(
         self,
-        advisor_messages: List[DiscussionMessage],
+        advisor_messages: list[DiscussionMessage],
         synthesis: str,
     ) -> Consensus:
         """Build a structured Consensus from the advisor messages."""

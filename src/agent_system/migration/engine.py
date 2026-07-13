@@ -68,7 +68,7 @@ class MigrationConfig(BaseModel):
     target_group_id: str = ""
 
     # Scope: which node types to include
-    node_types: List[str] = Field(default_factory=lambda: ["task", "output", "experience", "failure"])
+    node_types: list[str] = Field(default_factory=lambda: ["task", "output", "experience", "failure"])
 
     # Limits
     batch_size: int = 100
@@ -94,9 +94,9 @@ class MigrationResult(BaseModel):
     failed_batches: int = 0
     source_checksum: str = ""
     target_checksum: str = ""
-    error: Optional[str] = None
+    error: str | None = None
     started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
     duration_seconds: float = 0.0
 
     @property
@@ -112,10 +112,10 @@ class MigrationEngine:
     to S3 or similar; here we use in-memory snapshots for testing.
     """
 
-    def __init__(self, graph: Optional[MultiLinkGraph] = None):
+    def __init__(self, graph: MultiLinkGraph | None = None):
         self.graph = graph or get_graph()
-        self._migrations: Dict[str, MigrationResult] = {}
-        self._audit_log: List[Dict[str, Any]] = []
+        self._migrations: dict[str, MigrationResult] = {}
+        self._audit_log: list[dict[str, Any]] = []
 
     async def pre_check(self, config: MigrationConfig) -> tuple[bool, str]:
         """Validate that the migration can proceed."""
@@ -130,10 +130,10 @@ class MigrationEngine:
             logger.info(f"Cross-tenant migration to default: {config.id}")
         return True, ""
 
-    def select_nodes(self, config: MigrationConfig) -> List[GraphNode]:
+    def select_nodes(self, config: MigrationConfig) -> list[GraphNode]:
         """Pick the nodes to migrate based on the config."""
         all_nodes = self.graph._nodes.values()
-        selected: List[GraphNode] = []
+        selected: list[GraphNode] = []
         for node in all_nodes:
             tenant = (node.metadata or {}).get("tenant_id", "default")
             group = (node.metadata or {}).get("group_ids", [])
@@ -146,7 +146,7 @@ class MigrationEngine:
             selected.append(node)
         return selected
 
-    def checksum(self, nodes: List[GraphNode]) -> str:
+    def checksum(self, nodes: list[GraphNode]) -> str:
         """Stable hash of the node set (id + content)."""
         h = hashlib.sha256()
         for n in sorted(nodes, key=lambda x: x.id):
@@ -154,17 +154,17 @@ class MigrationEngine:
             h.update(json.dumps(n.content, sort_keys=True, default=str).encode("utf-8"))
         return h.hexdigest()
 
-    async def snapshot(self, nodes: List[GraphNode]) -> Dict[str, Any]:
+    async def snapshot(self, nodes: list[GraphNode]) -> dict[str, Any]:
         """Take a deep copy of the nodes for rollback."""
         return {n.id: n.model_copy(deep=True) for n in nodes}
 
     async def copy_batch(
         self,
-        source_nodes: List[GraphNode],
+        source_nodes: list[GraphNode],
         config: MigrationConfig,
-    ) -> List[GraphNode]:
+    ) -> list[GraphNode]:
         """Copy a batch to the target. Returns successfully copied nodes."""
-        copied: List[GraphNode] = []
+        copied: list[GraphNode] = []
         for n in source_nodes:
             try:
                 new_node = n.model_copy(deep=True)
@@ -184,7 +184,7 @@ class MigrationEngine:
                 logger.warning(f"Failed to copy node {n.id}: {e}")
         return copied
 
-    async def rollback(self, snapshot: Dict[str, Any]):
+    async def rollback(self, snapshot: dict[str, Any]):
         """Restore from snapshot (deletes target copies)."""
         # In a real impl, we'd track which IDs were created and delete them.
         # For now, snapshot is informational; production rollback would
@@ -266,7 +266,7 @@ class MigrationEngine:
         self._audit(config, result, "completed")
         return result
 
-    def get_result(self, config_id: str) -> Optional[MigrationResult]:
+    def get_result(self, config_id: str) -> MigrationResult | None:
         return self._migrations.get(config_id)
 
     def _audit(self, config: MigrationConfig, result: MigrationResult, outcome: str) -> None:
@@ -284,11 +284,11 @@ class MigrationEngine:
         self._audit_log.append(entry)
         logger.info(f"Migration {config.id} {outcome}: {entry}")
 
-    def get_audit_log(self) -> List[Dict[str, Any]]:
+    def get_audit_log(self) -> list[dict[str, Any]]:
         return list(self._audit_log)
 
 
-_default_engine: Optional[MigrationEngine] = None
+_default_engine: MigrationEngine | None = None
 
 
 def get_migration_engine() -> MigrationEngine:

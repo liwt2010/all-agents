@@ -49,11 +49,11 @@ class BackupConfig(BaseModel):
     compression: str = "gzip"
     # Source paths
     graph_json_dir: str = "./data/graph"
-    graph_sqlite_path: Optional[str] = None
-    graph_postgres_params: Optional[dict] = None
+    graph_sqlite_path: str | None = None
+    graph_postgres_params: dict | None = None
     audit_log_dir: str = "./data/audit"
     custom_agents_dir: str = "./data/custom_agents"
-    task_store_path: Optional[str] = None
+    task_store_path: str | None = None
 
 
 def load_backup_config_from_env() -> BackupConfig:
@@ -224,7 +224,7 @@ class BackupScheduler:
     def __init__(self, config: BackupConfig, storage_backend: str = "json"):
         self.config = config
         self.storage_backend = storage_backend
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._stopped = False
 
     async def start(self) -> None:
