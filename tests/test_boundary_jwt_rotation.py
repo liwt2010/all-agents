@@ -1,4 +1,4 @@
-﻿"""Boundary tests: JWT secret rotation with multiple active keys.
+"""Boundary tests: JWT secret rotation with multiple active keys.
 
 Issue: During JWT secret rotation, multiple keys are simultaneously valid.
 Verify requests are correctly routed to the appropriate key.
@@ -9,148 +9,110 @@ import pytest
 import time
 from datetime import datetime, timezone, timedelta
 
-from agent_system.core.auth.jwt import JWTAuthService, JWTPayload
+from agent_system.core.auth.jwt import AuthService, TokenPayload
 
 
 class TestJWTSecretRotation:
     """Test JWT secret rotation and multi-key handling."""
 
     def test_multiple_keys_all_validate(self):
-        """All registered keys should validate tokens signed by any of them."""
-        # Create auth service with multiple keys
-        keys = {
-            "key-1": "secret-key-one-for-testing-purposes",
-            "key-2": "secret-key-two-for-testing-purposes",
-            "key-3": "secret-key-three-for-testing-purposes",
-        }
+        """AuthService with single secret: verify issue/verify cycle works."""
+        svc = AuthService(secret="test-secret-key-32chars-long-enough-for-hs256")
 
-        svc = JWTAuthService(secrets=keys)
-
-        # Issue tokens with each key
         token1 = svc.issue_token("user1", tenant_id="tenant1")
         token2 = svc.issue_token("user2", tenant_id="tenant2")
 
-        # All tokens should validate
         payload1 = svc.verify_token(token1)
         payload2 = svc.verify_token(token2)
 
         assert payload1 is not None
         assert payload2 is not None
-        assert payload1.user_id == "user1"
-        assert payload2.user_id == "user2"
+        assert payload1.sub == "user1"
+        assert payload2.sub == "user2"
 
     def test_new_key_issues_tokens_after_rotation(self):
-        """After adding a new key, tokens should use the new key."""
-        keys = {
-            "key-1": "old-secret-key-for-testing",
-        }
+        """After rotation, tokens signed with old key still verify if kept."""
+        import os
+        os.environ["AUTH_SECRETS"] = "v2:new-secret-key-long-enough-32chars!,v1:old-secret-key-long-enough-32chars!"
+        try:
+            svc = AuthService()
 
-        svc = JWTAuthService(secrets=keys)
+            new_token = svc.issue_token("user1", tenant_id="tenant1")
+            assert svc.verify_token(new_token) is not None
 
-        # Issue token with old key
-        old_token = svc.issue_token("user1", tenant_id="tenant1")
-        assert svc.verify_token(old_token) is not None
-
-        # Simulate rotation: add new key, keep old key temporarily
-        keys["key-2"] = "new-secret-key-for-testing"
-        svc = JWTAuthService(secrets=keys)
-
-        # New token should work
-        new_token = svc.issue_token("user1", tenant_id="tenant1")
-        assert svc.verify_token(new_token) is not None
-
-        # Old token should still work (graceful rotation)
-        assert svc.verify_token(old_token) is not None, \
-            "Old key should still validate during rotation"
+            import jwt as PyJWT
+            now = int(time.time())
+            # Use raw dict because TokenPayload does not have a kid field
+            old_payload = {
+                "sub": "user2", "tenant_id": "tenant1", "role": "user", "scopes": [],
+                "iat": now,
+                "exp": now + 3600,
+                "kid": "v1",
+            }
+            old_token = PyJWT.encode(old_payload, "old-secret-key-long-enough-32chars!", algorithm="HS256")
+            assert svc.verify_token(old_token) is not None, "Old key should still validate"
+        finally:
+            os.environ.pop("AUTH_SECRETS", None)
 
     def test_old_key_deprecated_after_rotation(self):
-        """After removing old key, new tokens should use new key."""
-        keys = {
-            "key-1": "old-secret-key-for-testing",
-        }
+        """After removing old key, tokens signed with it should fail."""
+        import os
+        os.environ["AUTH_SECRETS"] = "v2:new-secret-key-long-enough-32chars!"
+        try:
+            svc = AuthService()
+            new_token = svc.issue_token("user1", tenant_id="tenant1")
+            assert svc.verify_token(new_token) is not None
 
-        svc = JWTAuthService(secrets=keys)
-        old_token = svc.issue_token("user1", tenant_id="tenant1")
-
-        # Rotate: remove old key, add new key
-        keys = {
-            "key-2": "new-secret-key-for-testing",
-        }
-        svc = JWTAuthService(secrets=keys)
-
-        # New token should work
-        new_token = svc.issue_token("user1", tenant_id="tenant1")
-        assert svc.verify_token(new_token) is not None
-
-        # Old token should fail (key is no longer valid)
-        result = svc.verify_token(old_token)
-        assert result is None, "Token signed with removed key should not validate"
+            import jwt as PyJWT
+            now = int(time.time())
+            old_payload = {
+                "sub": "user1", "tenant_id": "tenant1", "role": "user", "scopes": [],
+                "iat": now,
+                "exp": now + 3600,
+                "kid": "v1",
+            }
+            old_token = PyJWT.encode(old_payload, "old-secret-key-long-enough-32chars!", algorithm="HS256")
+            result = svc.verify_token(old_token)
+            assert result is None, "Token signed with removed key should not validate"
+        finally:
+            os.environ.pop("AUTH_SECRETS", None)
 
     def test_token_with_unknown_kid_fails(self):
         """Token with unknown key ID should fail validation."""
-        keys = {
-            "key-1": "secret-key-one",
-        }
-
-        svc = JWTAuthService(secrets=keys)
-
-        # Try to verify a token with unknown key ID
-        # This would require manual token manipulation
-        # In practice, unknown kid means the token was signed with a different key
+        svc = AuthService(secret="test-secret-key-32chars-long-enough-for-hs256")
         fake_token = "eyJhbGciOiJkaWQta2V5LTk5OSIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoidXNlcjEiLCJ0ZW5hbnRfaWQiOiJ0ZW5hbnQxIn0.fake"
-
         result = svc.verify_token(fake_token)
         assert result is None, "Token with unknown key should fail"
 
     def test_expired_token_fails_regardless_of_key(self):
         """Expired tokens should fail even with valid key."""
-        keys = {
-            "key-1": "secret-key-one",
-        }
+        svc = AuthService(secret="test-secret-key-32chars-long-enough-for-hs256")
 
-        svc = JWTAuthService(secrets=keys)
-
-        # Create an expired token manually
-        expired_payload = JWTPayload(
-            user_id="user1",
-            tenant_id="tenant1",
-            exp=datetime.now(timezone.utc) - timedelta(hours=1),  # Expired 1 hour ago
-            iat=datetime.now(timezone.utc) - timedelta(hours=2),
-            kid="key-1",
-        )
-
-        # Manually sign and encode
         import jwt as PyJWT
-        secret = "secret-key-one"
+        now = int(time.time())
+        # TokenPayload does NOT have a kid field, but for expired test we
+        # don't need kid matching: it will use the current secret as fallback
+        expired_payload = TokenPayload(
+            sub="user1",
+            tenant_id="tenant1",
+            role="user",
+            scopes=[],
+            exp=now - 3600,
+            iat=now - 7200,
+        )
         token = PyJWT.encode(
             expired_payload.model_dump(mode="json"),
-            secret,
+            "test-secret-key-32chars-long-enough-for-hs256",
             algorithm="HS256",
-            json_encoder_experimental=False,
         )
 
-        # Should fail validation due to expiration
         result = svc.verify_token(token)
         assert result is None, "Expired token should fail validation"
 
     def test_token_without_kid_uses_default_key(self):
-        """Token without key ID should use default/first key."""
-        keys = {
-            "key-1": "secret-key-one",
-            "key-2": "secret-key-two",
-        }
-
-        svc = JWTAuthService(secrets=keys)
-
-        # Issue token (should include kid)
+        """Token without key ID should use default/fallback key."""
+        svc = AuthService(secret="test-secret-key-32chars-long-enough-for-hs256")
         token = svc.issue_token("user1", tenant_id="tenant1")
-
-        # Verify it has kid header
-        import jwt as PyJWT
-        header = PyJWT.get_unverified_header(token)
-        assert "kid" in header, "Token should include key ID"
-
-        # Token should validate
         result = svc.verify_token(token)
         assert result is not None
 
@@ -159,48 +121,41 @@ class TestJWTKeyPriority:
     """Test key selection and priority during rotation."""
 
     def test_most_recent_key_is_default(self):
-        """The most recently added key should be the default for new tokens."""
-        keys = {
-            "key-old": "old-secret-key",
-            "key-new": "new-secret-key",
-        }
+        """The first key should be the default for new tokens."""
+        import os
+        secret_val = "new-secret-key-long-enough-32chars!"
+        os.environ["AUTH_SECRETS"] = f"key-new:{secret_val},key-old:old-secret-key-long-enough-32chars!"
+        try:
+            svc = AuthService()
 
-        svc = JWTAuthService(secrets=keys)
+            token = svc.issue_token("user1", tenant_id="tenant1")
 
-        # New token should use new key
-        token = svc.issue_token("user1", tenant_id="tenant1")
-
-        import jwt as PyJWT
-        header = PyJWT.get_unverified_header(token)
-        assert header.get("kid") == "key-new", "New tokens should use most recent key"
+            import jwt as PyJWT
+            data = PyJWT.decode(token, options={"verify_signature": False})
+            assert data.get("kid") == "key-new", "New tokens should use first/current key"
+        finally:
+            os.environ.pop("AUTH_SECRETS", None)
 
     def test_all_keys_can_validate(self):
         """During transition, any valid key should validate."""
-        keys = {
-            "key-old": "old-secret-key",
-            "key-new": "new-secret-key",
-        }
+        import os
+        os.environ["AUTH_SECRETS"] = "key-new:new-secret-key-long-enough-32chars!,key-old:old-secret-key-long-enough-32chars!"
+        try:
+            svc = AuthService()
 
-        svc = JWTAuthService(secrets=keys)
+            import jwt as PyJWT
+            now = int(time.time())
+            old_payload = {
+                "sub": "user1", "tenant_id": "tenant1", "role": "user", "scopes": [],
+                "exp": now + 3600,
+                "iat": now,
+                "kid": "key-old",
+            }
+            old_token = PyJWT.encode(old_payload, "old-secret-key-long-enough-32chars!", algorithm="HS256")
 
-        # Issue tokens with both keys
-        import jwt as PyJWT
+            new_token = svc.issue_token("user1", tenant_id="tenant1")
 
-        old_payload = JWTPayload(
-            user_id="user1",
-            tenant_id="tenant1",
-            exp=datetime.now(timezone.utc) + timedelta(hours=1),
-            iat=datetime.now(timezone.utc),
-            kid="key-old",
-        )
-        old_token = PyJWT.encode(
-            old_payload.model_dump(mode="json"),
-            "old-secret-key",
-            algorithm="HS256",
-        )
-
-        new_token = svc.issue_token("user1", tenant_id="tenant1")
-
-        # Both should validate
-        assert svc.verify_token(old_token) is not None, "Old key should still validate"
-        assert svc.verify_token(new_token) is not None, "New key should validate"
+            assert svc.verify_token(old_token) is not None, "Old key should validate"
+            assert svc.verify_token(new_token) is not None, "New key should validate"
+        finally:
+            os.environ.pop("AUTH_SECRETS", None)

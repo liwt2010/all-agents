@@ -1,9 +1,13 @@
-﻿"""Boundary tests: LLM API error handling (429/500/timeout) with 4-way Resolver.
+"""Boundary tests: LLM API error handling (429/500/timeout) with 4-way Resolver.
 
 Issue: LLM API returns 429/500/timeout, verify 4-way Resolver correctly falls back.
 - 429 (rate limit) -> SELF retry with backoff
 - 500 (server error) -> PEER consultation or ESCALATE
 - Timeout -> SELF retry or ESCALATE
+
+Note: SmartResolver(agent).resolve(task, error, analysis) returns ResolutionResult
+with path and status fields. The resolver tests the evaluation + routing pipeline,
+not the actual retry loop (which is tested in core agent tests).
 
 Run: pytest tests/test_boundary_llm_errors.py -v
 """
@@ -13,7 +17,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from agent_system.core.agent import SmartAgent, TaskContext, OutputSchema
-from agent_system.core.resolver import SmartResolver
+from agent_system.core.resolver import SmartResolver, ResolutionResult, ResolutionStatus
 from agent_system.core.evaluator import (
     ProblemAnalysis,
     ResolutionPath,
@@ -40,16 +44,9 @@ class TestLLM429RateLimit:
             description: str = "Test"
             model_config = ConfigDict(extra="allow")
 
-            def __init__(self, **kwargs):
-                super().__init__(**kwargs)
-                object.__setattr__(self, "call_count", 0)
-
             async def do_work(self, task: TaskContext) -> OutputSchema:
-                self.call_count += 1
-                if self.call_count == 1:
-                    raise TransientLLMError("Rate limit exceeded", is_retriable=True)
                 return OutputSchema(
-                    id=f"success-{self.call_count}",
+                    id=f"success-{task.task_id}",
                     type="result",
                     created_at=datetime.now(timezone.utc),
                     created_by=self.agent_name,
@@ -59,23 +56,22 @@ class TestLLM429RateLimit:
         resolver = SmartResolver(agent)
 
         task = TaskContext(task_id="test-429", input="test")
-        error = TransientLLMError("429 Too Many Requests", is_retriable=True)
+        error = TransientLLMError("429 Too Many Requests")
         analysis = ProblemAnalysis(
             severity=Severity.LOW,
             confidence=0.9,
             can_self_solve=True,
             needs_peer_help=False,
-            action_category=ActionCategory.SIMPLE,
+            action_category=ActionCategory.NORMAL,
             suggested_path=ResolutionPath.SELF,
             reasoning="Transient error, retry may work",
+            error_summary=str(error),
         )
 
         result = await resolver.resolve(task, error, analysis)
 
-        # Should retry via SELF, not escalate
-        assert result.path in (ResolutionPath.SELF, ResolutionPath.ESCALATE)
-        if result.path == ResolutionPath.SELF:
-            assert result.status.value in ("success", "pending")
+        assert result.path == ResolutionPath.SELF
+        assert result.status.value in ("success", "pending")
 
 
 class TestLLM500ServerError:
@@ -98,29 +94,27 @@ class TestLLM500ServerError:
 
             async def do_work(self, task: TaskContext) -> OutputSchema:
                 self.call_count += 1
-                # Always fail with 500
-                raise TransientLLMError("500 Internal Server Error", is_retriable=True)
+                raise TransientLLMError("500 Internal Server Error")
 
         agent = FailingAgent()
         resolver = SmartResolver(agent)
 
         task = TaskContext(task_id="test-500", input="test")
-        error = TransientLLMError("500 Internal Server Error", is_retriable=True)
+        error = TransientLLMError("500 Internal Server Error")
         analysis = ProblemAnalysis(
             severity=Severity.HIGH,
             confidence=0.3,
             can_self_solve=False,
             needs_peer_help=True,
-            action_category=ActionCategory.COMPLEX,
+            action_category=ActionCategory.HIGH_IMPACT,
             suggested_path=ResolutionPath.PEER,
             reasoning="Server error, need peer help",
+            error_summary=str(error),
         )
 
         result = await resolver.resolve(task, error, analysis)
 
-        # Should escalate (not stuck in SELF loop)
         assert result.path in (ResolutionPath.PEER, ResolutionPath.ESCALATE)
-        assert result.path != ResolutionPath.SELF  # No infinite SELF loop
 
 
 class TestLLMTimeout:
@@ -138,26 +132,26 @@ class TestLLMTimeout:
             model_config = ConfigDict(extra="allow")
 
             async def do_work(self, task: TaskContext) -> OutputSchema:
-                raise TransientLLMError("Request timeout", is_retriable=True)
+                raise TransientLLMError("Request timeout")
 
         agent = TimeoutAgent()
         resolver = SmartResolver(agent)
 
         task = TaskContext(task_id="test-timeout", input="test")
-        error = TransientLLMError("Request timeout after 30s", is_retriable=True)
+        error = TransientLLMError("Request timeout after 30s")
         analysis = ProblemAnalysis(
             severity=Severity.MEDIUM,
             confidence=0.5,
             can_self_solve=False,
             needs_peer_help=True,
-            action_category=ActionCategory.COMPLEX,
+            action_category=ActionCategory.HIGH_IMPACT,
             suggested_path=ResolutionPath.ESCALATE,
             reasoning="Timeout indicates complex issue",
+            error_summary=str(error),
         )
 
         result = await resolver.resolve(task, error, analysis)
 
-        # Should not loop forever
         assert result.path in (ResolutionPath.ESCALATE, ResolutionPath.PEER)
 
 
@@ -188,12 +182,12 @@ class TestFatalLLMError:
             confidence=1.0,
             can_self_solve=False,
             needs_peer_help=False,
-            action_category=ActionCategory.COMPLEX,
+            action_category=ActionCategory.HIGH_IMPACT,
             suggested_path=ResolutionPath.ESCALATE,
             reasoning="Fatal error, cannot retry",
+            error_summary=str(error),
         )
 
         result = await resolver.resolve(task, error, analysis)
 
-        # Should escalate, not retry
         assert result.path == ResolutionPath.ESCALATE

@@ -1,0 +1,86 @@
+# Pre-commit hooks for code quality enforcement.
+#
+# Install:
+#   pip install pre-commit
+#   pre-commit install
+#
+# Run on all files (verify setup):
+#   pre-commit run --all-files
+#
+# Skip hooks (rarely):
+#   git commit --no-verify -m "WIP"
+
+repos:
+  # Standard checks (whitespace, EOF, large files, etc.)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: [--branch=main]
+
+  # ruff: linter + formatter (replaces flake8/isort/black/pydocstyle)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        args: [--fix, --exit-non-zero-on-fix]
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: ruff (format)
+        types_or: [python, pyi]
+
+  # mypy: strict on core modules, advisory elsewhere
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        name: mypy (strict on core modules)
+        args:
+          - --config-file=pyproject.toml
+          - src/agent_system/core
+          - src/agent_system/memory
+          - src/agent_system/storage
+        files: ^src/agent_system/(core|memory|storage)/.*\.py$
+        additional_dependencies:
+          - pydantic>=2.0
+          - pydantic-settings>=2.0
+          - types-PyYAML
+          - types-redis
+
+  # Project-specific: block secrets in source files
+  - repo: local
+    hooks:
+      - id: no-secrets
+        name: Block secrets/API keys
+        entry: python scripts/check_no_secrets.py
+        language: system
+        types: [text]
+        files: \.(py|yaml|yml|json|env|sh|toml|md)$
+        exclude: |
+          (?x)^(
+              tests/test_.*\.py
+            | tests/fixtures/.*
+            | .*example.*
+            | \.env\.example
+            | SECURITY\.md
+            | docs/.*
+          )$
+
+fail_fast: true
+
+default_language_version:
+  python: python3.11
