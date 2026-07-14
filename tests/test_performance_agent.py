@@ -98,11 +98,11 @@ class TestAgentExecutionTime:
 
         # Target: p99 < 100ms for simple mock tasks
         print(f"\nAgent execution (mock):")
-        print(f"  avg={stats["avg_ms"]:.2f}ms, p50={stats["p50_ms"]:.2f}ms")
-        print(f"  p95={stats["p95_ms"]:.2f}ms, p99={stats["p99_ms"]:.2f}ms")
-        print(f"  min={stats["min_ms"]:.2f}ms, max={stats["max_ms"]:.2f}ms")
+        print(f"  avg={stats['avg_ms']:.2f}ms, p50={stats['p50_ms']:.2f}ms")
+        print(f"  p95={stats['p95_ms']:.2f}ms, p99={stats['p99_ms']:.2f}ms")
+        print(f"  min={stats['min_ms']:.2f}ms, max={stats['max_ms']:.2f}ms")
 
-        assert stats["p99_ms"] < 200, f"Agent execution too slow: {stats}"
+        assert stats['p99_ms'] < 200, f"Agent execution too slow: {stats}"
 
     @pytest.mark.asyncio
     async def test_agent_execution_time_with_memory(self):
@@ -136,10 +136,10 @@ class TestAgentExecutionTime:
         stats = _stats(times)
 
         print(f"\nAgent execution (with memory):")
-        print(f"  avg={stats["avg_ms"]:.2f}ms, p99={stats["p99_ms"]:.2f}ms")
+        print(f"  avg={stats['avg_ms']:.2f}ms, p99={stats['p99_ms']:.2f}ms")
 
         # Memory adds overhead, so allow more time
-        assert stats["p99_ms"] < 500, f"Agent with memory too slow: {stats}"
+        assert stats['p99_ms'] < 500, f"Agent with memory too slow: {stats}"
 
 
 class TestConcurrentTaskHandling:
@@ -372,10 +372,10 @@ class TestP99Latency:
             get_times.append((time.perf_counter() - t0) * 1000)
 
         stats = _stats(get_times)
-        print(f"\nGraph get_node P99: {stats["p99_ms"]:.4f}ms")
+        print(f"\nGraph get_node P99: {stats['p99_ms']:.4f}ms")
 
         # P99 should be < 1ms for in-memory lookups
-        assert stats["p99_ms"] < 1.0, f"get_node P99 too high: {stats}"
+        assert stats['p99_ms'] < 1.0, f"get_node P99 too high: {stats}"
 
         # Test find_nodes latency
         find_times = []
@@ -385,7 +385,7 @@ class TestP99Latency:
             find_times.append((time.perf_counter() - t0) * 1000)
 
         stats = _stats(find_times)
-        print(f"Graph find_nodes P99: {stats["p99_ms"]:.4f}ms")
+        print(f"Graph find_nodes P99: {stats['p99_ms']:.4f}ms")
 
         # P99 should be < 10ms for small graphs
-        assert stats["p99_ms"] < 10.0, f"find_nodes P99 too high: {stats}"
+        assert stats['p99_ms'] < 10.0, f"find_nodes P99 too high: {stats}"
