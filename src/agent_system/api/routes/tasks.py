@@ -114,7 +114,7 @@ async def submit_task(
     # 1. Sanitize input
     validation = sanitizer.validate(request.input)
     if not validation.valid:
-        audit_logger.log(AuditLogEntry(
+        await audit_logger.log(AuditLogEntry(
             user_id=user.id, action="task.rejected",
             details={"reason": validation.issues, "agent": request.agent},
             outcome="denied",
@@ -180,7 +180,7 @@ async def submit_task(
         )
         task_store.save(record)
 
-        audit_logger.log(AuditLogEntry(
+        await audit_logger.log(AuditLogEntry(
             user_id=user_id,
             action="task.completed",
             resource_id=task_id,
@@ -203,7 +203,7 @@ async def submit_task(
         return TaskResponse(task_id=task_id, status=status, output=result.get("output"), error=result.get("error"))
 
     except Exception as e:
-        audit_logger.log(AuditLogEntry(
+        await audit_logger.log(AuditLogEntry(
             user_id=user_id,
             action="task.failed",
             resource_id=task_id,

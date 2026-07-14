@@ -139,7 +139,7 @@ class Notifier:
 
     def _log_handler(self, n: Notification) -> None:
         try:
-            audit_logger.log(AuditLogEntry(
+            await audit_logger.log(AuditLogEntry(
                 user_id=n.recipient or "system",
                 action="notification",
                 resource_type="notification",

@@ -92,7 +92,7 @@ jobs:
           echo "=== ruff strict (core modules, E/F/W/B rules) ==="
           ruff check src/agent_system/core/ src/agent_system/memory/ src/agent_system/storage/ --select=E,F,W,B
           echo "=== ruff advisory (all modules, informational) ==="
-          ruff check src/ tests/ --select=E,F,W,I,UP,B,C4,SIM || true
+          ruff check src/ tests/ --select=E,F,W,I,UP,B,C4,SIM
           echo "=== mypy strict (core modules) ==="
           mypy src/agent_system/core/ src/agent_system/memory/ src/agent_system/storage/
         continue-on-error: false
