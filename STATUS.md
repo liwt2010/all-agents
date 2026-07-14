@@ -1,7 +1,7 @@
 # Agent System — Status Report
 
-> **Last updated:** 2026-07-09 (post v0.1.0 release)
-> **Tag:** `v0.1.0` at commit `b515cc4`
+> **Last updated:** 2026-07-14 (post v0.1.0 release)
+> **Tag:** `v0.1.0` at commit `32b8fe0`
 > **Status:** 🟢 **Production-grade**, ready for deployment
 
 This document tracks the actual current state of the Agent System platform
@@ -24,8 +24,8 @@ a full CI/CD gate, observability stack, and operational runbook.
 | Source LOC (Python) | ~22,000 |
 | Built-in agents | **9** (Product, Tech, Test, Deploy, CEO, Security, Docs, Review, DevOps) |
 | Test files | 60+ |
-| Tests passing | **887** total collected (see breakdown below) |
-| Known failures | **0** |
+| Tests passing | **847** (plus 7 skipped, 36 pre-existing known failures) |
+| Known failures | **3** (test_task_store_integration: missing langgraph dep); 12 others (iterations, SDK gen) |
 | Production-grade hardening | CORS, TLS, JWT rotation, rate limit, audit, backup |
 | CI workflow | 2 jobs + manual dispatch (real-LLM smoke) |
 | Docker image | `liwt2010/all-agents:v0.1.0` (699MB, smoke-tested) |
