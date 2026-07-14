@@ -13,6 +13,7 @@ This module adds:
   - ResumeManager: tracks failed tasks + their checkpoint, allows resume
 """
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
@@ -92,7 +93,10 @@ class Notifier:
         )
         for handler in self._handlers.get(channel, []):
             try:
-                handler(n)
+                if asyncio.iscoroutinefunction(handler):
+                    asyncio.ensure_future(handler(n))
+                else:
+                    handler(n)
             except Exception as e:
                 logger.warning(f"Notification handler failed: {e}")
         return n
@@ -137,7 +141,7 @@ class Notifier:
                 return True
         return False
 
-    def _log_handler(self, n: Notification) -> None:
+    async def _log_handler(self, n: Notification) -> None:
         try:
             await audit_logger.log(AuditLogEntry(
                 user_id=n.recipient or "system",

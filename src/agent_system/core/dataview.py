@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent_system.memory.graph import (
     MultiLinkGraph,
@@ -79,8 +79,7 @@ class QueryResult(BaseModel):
     duration_ms: float = 0.0
     row_count: int = 0
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 # ─── Tokenizer ────────────────────────────────────────────────────
