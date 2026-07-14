@@ -7,6 +7,32 @@ on:
     branches: [main]
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Security audit (pip-audit): scan dependencies for known CVEs
+  # ---------------------------------------------------------------------------
+  security-audit:
+    name: Security audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+      - name: Run pip-audit
+        # Fail build if any dependency has a known CVE
+        # --strict: exit non-zero on any vulnerability
+        # --vulnerability-service osv: use Google's OSV database (free, no auth)
+        # --no-deps: only scan direct deps (not transitive) - faster, fewer false positives
+        run: |
+          echo "=== pip-audit (strict mode) ==="
+          pip-audit --strict --vulnerability-service osv -r requirements.txt
+        continue-on-error: false
+
   unit-tests:
     name: Unit tests (no API key)
     runs-on: ubuntu-latest
