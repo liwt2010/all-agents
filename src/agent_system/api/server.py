@@ -43,6 +43,7 @@ from agent_system.api.state import (
     get_checkpoint_tracker_singleton,
     get_in_flight_tasks,
     get_start_time,
+    _checkpoint_tracker,
 )
 from agent_system.core.auth import AuthMiddleware
 from agent_system.core.metrics_middleware import MetricsMiddleware
@@ -139,7 +140,8 @@ app = FastAPI(
         {"name": "health", "description": "Liveness + readiness probes"},
         {"name": "auth", "description": "JWT login / token refresh"},
         {"name": "agents", "description": "Run individual agents (product, tech, test, deploy, ceo)"},
-        {"name": "tasks", "description": "Multi-agent pipeline orchestration (product->tech->test->deploy)"},
+        {"name": "pipeline", "description": "Multi-agent pipeline orchestration (product->tech->test->deploy)"},
+        {"name": "tasks", "description": "Task submission, status, and progress streaming"},
         {"name": "memory", "description": "Memory graph CRUD + experience query"},
         {"name": "audit", "description": "Audit log query + export"},
         {"name": "metrics", "description": "Prometheus metrics (scraped at /metrics)"},

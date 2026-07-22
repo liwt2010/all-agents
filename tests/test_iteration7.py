@@ -220,7 +220,7 @@ class TestDocker:
         assert "EXPOSE 8000" in content
 
     def test_docker_compose_content(self):
-        with open("docker-compose.yml", "r") as f:
+        with open("docker-compose.yml", "r", encoding="utf-8") as f:
             content = f.read()
         assert "api:" in content
         assert "8000:8000" in content

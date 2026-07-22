@@ -18,7 +18,7 @@ import logging
 import time as _time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -53,7 +53,7 @@ router = APIRouter(tags=["tasks"])
 # ---------------------------------------------------------------------------
 # Agent registry (small enough to keep here; could move to config later)
 # ---------------------------------------------------------------------------
-def _build_agent_registry() -> Dict[str, type]:
+def _build_agent_registry() -> dict[str, type]:
     """Lazy import to avoid circular deps / heavy imports at module load."""
     from agent_system.agents.ceo_agent import CEOAgent
     from agent_system.agents.deploy_agent import DeployAgent
@@ -79,14 +79,14 @@ class TaskRequest(BaseModel):
     input: str
     agent: str = "product"
     department_id: str = ""
-    task_id: Optional[str] = None  # user_id / tenant_id derived from JWT
+    task_id: str | None = None  # user_id / tenant_id derived from JWT
 
 
 class TaskResponse(BaseModel):
     task_id: str
     status: str
-    output: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+    output: dict[str, Any] | None = None
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -246,9 +246,9 @@ async def get_task(
 async def list_tasks(
     limit: int = Query(10, le=100),
     offset: int = Query(0, ge=0),
-    status: Optional[str] = None,
+    status: str | None = None,
     user: User = Depends(_require_auth()),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """List recent tasks (tenant-isolated)."""
     task_store = get_task_store_singleton()
     all_records = task_store.list(tenant_id=user.tenant_id, status=status, limit=limit + offset)

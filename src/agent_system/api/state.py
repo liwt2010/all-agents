@@ -75,20 +75,20 @@ def get_sanitizer_singleton():
 # ---------------------------------------------------------------------------
 # In-flight task registry (for graceful shutdown)
 # ---------------------------------------------------------------------------
-_in_flight_tasks: Set[asyncio.Task] = set()
+_in_flight_tasks: set[asyncio.Task] = set()
 
 
-def get_in_flight_tasks() -> Set[asyncio.Task]:
+def get_in_flight_tasks() -> set[asyncio.Task]:
     return _in_flight_tasks
 
 
 # ---------------------------------------------------------------------------
 # WebSocket connection registry
 # ---------------------------------------------------------------------------
-_ws_connections: Dict[str, List[WebSocket]] = {}
+_ws_connections: dict[str, list[WebSocket]] = {}
 
 
-def get_ws_connections() -> Dict[str, List[WebSocket]]:
+def get_ws_connections() -> dict[str, list[WebSocket]]:
     return _ws_connections
 
 

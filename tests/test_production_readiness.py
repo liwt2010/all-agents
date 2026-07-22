@@ -164,21 +164,43 @@ class TestAPIServer:
         except Exception as e:
             pytest.fail(f"Failed to import agent_system.api.server: {e}")
 
+    @staticmethod
+    def _app_paths(app):
+        """Return {path} for every mounted route.
+
+        FastAPI >=0.100 wraps include_router() children in _IncludedRouter
+        sentinels. Their wrapped routes live on the `original_router`
+        attribute, not under `router` — and they only appear in
+        app.router.routes, not app.routes.
+        """
+        paths: set[str] = set()
+        for r in app.router.routes:
+            p = getattr(r, "path", None)
+            if isinstance(p, str) and p:
+                paths.add(p)
+            wrapped = getattr(r, "original_router", None)
+            if wrapped is not None:
+                for sub in wrapped.routes:
+                    sp = getattr(sub, "path", None)
+                    if isinstance(sp, str) and sp:
+                        paths.add(sp)
+        return paths
+
     def test_health_endpoint_exists(self):
         from agent_system.api.server import app
-        paths = {route.path for route in app.routes}
+        paths = self._app_paths(app)
         assert "/api/health" in paths, "Missing /api/health endpoint"
         assert "/api/ready" in paths, "Missing /api/ready endpoint"
 
     def test_metrics_endpoint_exists(self):
         from agent_system.api.server import app
-        paths = {route.path for route in app.routes}
+        paths = self._app_paths(app)
         # PR-10 added standard /metrics (Prometheus format)
         assert "/metrics" in paths, "Missing /metrics Prometheus endpoint"
 
     def test_audit_query_endpoint_exists(self):
         from agent_system.api.server import app
-        paths = {route.path for route in app.routes}
+        paths = self._app_paths(app)
         # PR-11 added audit query endpoint
         assert "/api/audit/query" in paths, "Missing /api/audit/query endpoint"
 
