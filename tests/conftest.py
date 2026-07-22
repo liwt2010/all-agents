@@ -29,6 +29,14 @@ if str(SRC) not in sys.path:
 # imports load_dotenv() with a stricter .env default.
 os.environ["ALLOWED_FILE_ROOTS"] = "data,tmp,."
 
+# Provide a default JWT secret for tests that construct AuthService() with
+# no args (e.g. test_singleton, test_non_http_passes_through). 32+ chars
+# so the production-length warning doesn't fire.
+os.environ.setdefault(
+    "AUTH_SECRET",
+    "test-only-jwt-secret-32chars-long-enough-for-hs256",
+)
+
 
 def pytest_collection_modifyitems(config, items):
     """
