@@ -85,64 +85,26 @@ docker run -d --name agent-system \
 
 ---
 
-## 生产级特性 (v0.1.0)
+## 生产级特性
 
-### 核心平台
-- **9 个内置智能体**(5 个生产 + 4 个专项)
-- **SmartAgent.execute()** 拆分为 checkpoint / retry / failure / escalate
-- **Dataview 引擎** — 在记忆图谱上跑类 SQL 查询
-- **4 路径解析器**:SELF / PEER / HUMAN / ESCALATE
-- **AgentRegistry** 动态查找智能体
-- **自定义 Agent 平台** — Pydantic v2 友好,支持热重载
+### v0.3.0 — 自定义 Agent 市场 + GitHub App
 
-### 记忆与学习
-- **MultiLinkGraph** — 11 种节点类型、23 种链接类型、时间衰减相似度
-- **经验反馈循环** — 失败的任务为后续尝试提供参考
-- **`memory_enabled` 可选关闭** — 支持临时性工作流
+- **YAML 驱动的自定义智能体** — 租户通过 `examples/custom-agents/*.yaml` 定义自己的智能体，无需改代码。由 `load_from_directory()` 加载，通过 `/api/custom-agents`（list / get / run / upload / delete）对外暴露。多租户隔离；跨租户访问返回 404。
+- **GitHub App Webhook 集成** — `POST /api/webhooks/github` HMAC-SHA256 签名验证，按 `X-GitHub-Delivery` 去重，在 `pull_request` opened / synchronize / reopened 时自动触发 `ReviewAgent`。可选 `GITHUB_PR_COMMENT_TOKEN` 将审查结果回贴为 PR 评论。
 
-### Schema 与数据完整性
-- **4 级 Schema 宽容**(STRICT / LENIENT / REPAIR / WARN),支持自动修复
-- **数据溯源** 每次输出: `REAL_LLM`(置信度 0.85)/ `MOCK`(0.0)/ `LLM_FAILURE`(0.0)
-- **FailureNodeLogger** — 每次 LLM 失败都成为可审计的图谱节点
-- **`raw_output` 兜底** — 部分结果绝不静默失败
+### v0.2.0 — 生产强化里程碑
 
-### 可观测性
-- **OpenTelemetry 分布式追踪** — DISABLED / CONSOLE / OTLP_HTTP 三种模式
-  - `agent.execute` span 包含状态 + 异常
-  - FastAPI 中间件自动包装每个 HTTP 请求
-- **Prometheus 指标** — 11 个指标位于 `/metrics`
-- **批量审计日志** — 支持保留期(默认 90 天)+ HTTP 查询接口
-- **请求 ID 透传** 通过 `X-Request-ID` 头
+**RS256 JWT + JWKS 端点**：`AuthService` 自动检测：`AUTH_PRIVATE_KEY` → RS256（非对称，推荐多签发方 / 多租户）；否则 HS256（兼容旧版）。公钥通过 `GET /api/auth/jwks`（RFC 7517）分发。`scripts/gen_rsa_keys.py` 生成 2048 / 3072 / 4096 位 RSA 密钥对。
 
-### API 与 SDK
-- **OpenAPI 3.1** 规范,元数据丰富(3 个 server、7 个 tag、9 个 schema)
-- **Python SDK** 通过 `openapi-python-client` 自动生成
-- **TypeScript SDK** 通过 `openapi-typescript-codegen` 自动生成
-- **`make codegen`** 一键重新生成
+**分布式滑动窗口限流**：可插拔 `RateLimiterBackend` — `InMemoryBackend`（默认，单进程）与 `RedisBackend`（多副本安全，Lua 原子操作 ZSET）。设置 `REDIS_URL` 激活；Redis 不可达时自动回退到内存模式。
 
-### 安全加固
-- **CORS** — 环境感知,生产环境拒绝 `*`,强制 `https://`
-- **TLS** — HSTS 头(生产环境默认开启)、HTTPS 重定向中间件、安全 cookie 检查
-- **JWT 密钥轮换** — `AUTH_SECRETS="kid:secret,..."` 多密钥,零停机滚动
-- **滑动窗口限流** — 按用户 + 按作用域
-- **请求体大小限制**(默认 1MB)+ **请求中密钥检测**
-- **输入清洗** — Prompt 注入检测(TrustLevel 感知)
+**OpenTelemetry FastAPI 自动埋点**：当 `AGENT_OTEL_ENABLED=true` 时，启动时自动调用 `FastAPIInstrumentor.instrument_app(app)`，每个请求发出按路由命名的 span。
 
-### 存储与运维
-- **可插拔存储** — JSON / SQLite / PostgreSQL
-- **备份子系统** — cron + SHA-256 清单 + tar.gz + DR 演练
-- **分布式锁** — Redis 后端,内存兜底
-- **迁移 CLI** — 切换后端不丢数据
-- **多租户隔离** — 6 空间隔离模型
-- **RBAC** — 6 个角色、7 个权限、权限组覆盖
+**PostgreSQL 行级安全（RLS）**：租户隔离在数据库 Schema 层强制实施。`RLS_MIGRATION_SQL`（幂等）添加 `tenant_id` 列、索引和 RLS 策略。默认 fail-closed。`set_tenant_id()` + `_conn_with_tenant()` 每次连接 checkout 时设置 GUC。跨租户管理员使用 `BYPASSRLS` 角色。
 
-### 开发者体验
-- **生产部署指南** — [docs/PRODUCTION.md](docs/PRODUCTION.md)(11KB,15 章节)
-- **故障响应手册** — [docs/RUNBOOK.md](docs/RUNBOOK.md)
-- **发布说明** — [RELEASE_NOTES.md](RELEASE_NOTES.md)
-- **CI 门禁** — 生产就绪测试套件阻止低质量 PR
+**WebSocket 流式 LLM**：`/api/ws/llm/stream?token=&prompt=&system=` 升级 WebSocket 并逐 token 发出文本增量。`LLMRouter.stream_chunks()` 支持 Anthropic 和 OpenAI 兼容提供商。15 秒心跳检测；客户端断连时自动取消。
 
----
+### v0.1.0 — 初始发布
 
 ## API 端点
 
@@ -269,7 +231,7 @@ ANTHROPIC_API_KEY=sk-xxx pytest tests/test_*real_llm.py -v
 pytest tests/test_production_readiness.py -v
 ```
 
-**当前状态**:362 个单元测试 + 5 个真实 LLM 端到端测试,0 已知回归。
+**当前状态**:**1012** 测试通过,**5** 跳过,**2** xfail,**3** 个 known failure（需 API key）。
 
 ---
 

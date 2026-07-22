@@ -85,64 +85,26 @@ docker run -d --name agent-system \
 
 ---
 
-## 生產級特性 (v0.1.0)
+## 生產級特性
 
-### 核心平臺
-- **9 個內建智能體**(5 個生產 + 4 個專項)
-- **SmartAgent.execute()** 拆分為 checkpoint / retry / failure / escalate
-- **Dataview 引擎** — 在記憶圖譜上跑類 SQL 查詢
-- **四路徑解析器**:SELF / PEER / HUMAN / ESCALATE
-- **AgentRegistry** 動態查找智能體
-- **自訂 Agent 平臺** — Pydantic v2 友善,支援熱重載
+### v0.3.0 — 自訂 Agent 市場 + GitHub App
 
-### 記憶與學習
-- **MultiLinkGraph** — 11 種節點類型、23 種連結類型、時間衰減相似度
-- **經驗回饋迴圈** — 失敗的任務為後續嘗試提供參考
-- **`memory_enabled` 可選關閉** — 支援臨時性工作流程
+- **YAML 驅動的自訂智能體** — 租戶透過 `examples/custom-agents/*.yaml` 定義自己的智能體，無需改程式碼。由 `load_from_directory()` 載入，透過 `/api/custom-agents`（list / get / run / upload / delete）對外暴露。多租戶隔離；跨租戶存取返回 404。
+- **GitHub App Webhook 整合** — `POST /api/webhooks/github` HMAC-SHA256 簽章驗證，按 `X-GitHub-Delivery` 去重，在 `pull_request` opened / synchronize / reopened 時自動觸發 `ReviewAgent`。可選 `GITHUB_PR_COMMENT_TOKEN` 將審查結果回貼為 PR 評論。
 
-### Schema 與資料完整性
-- **四級 Schema 寬容**(STRICT / LENIENT / REPAIR / WARN),支援自動修復
-- **資料溯源** 每次輸出: `REAL_LLM`(置信度 0.85)/ `MOCK`(0.0)/ `LLM_FAILURE`(0.0)
-- **FailureNodeLogger** — 每次 LLM 失敗都成為可稽核的圖譜節點
-- **`raw_output` 兜底** — 部分結果絕不靜默失敗
+### v0.2.0 — 生產強化里程碑
 
-### 可觀測性
-- **OpenTelemetry 分散式追蹤** — DISABLED / CONSOLE / OTLP_HTTP 三種模式
-  - `agent.execute` span 包含狀態 + 例外
-  - FastAPI 中介層自動包裝每個 HTTP 請求
-- **Prometheus 指標** — 11 個指標位於 `/metrics`
-- **批量稽核日誌** — 支援保留期(預設 90 天)+ HTTP 查詢介面
-- **請求 ID 透傳** 透過 `X-Request-ID` 標頭
+**RS256 JWT + JWKS 端點**：`AuthService` 自動檢測：`AUTH_PRIVATE_KEY` → RS256（非對稱，推薦多簽發方 / 多租戶）；否則 HS256（相容舊版）。公鑰透過 `GET /api/auth/jwks`（RFC 7517）分發。`scripts/gen_rsa_keys.py` 生成 2048 / 3072 / 4096 位 RSA 金鑰對。
 
-### API 與 SDK
-- **OpenAPI 3.1** 規範,中繼資料豐富(3 個 server、7 個 tag、9 個 schema)
-- **Python SDK** 透過 `openapi-python-client` 自動生成
-- **TypeScript SDK** 透過 `openapi-typescript-codegen` 自動生成
-- **`make codegen`** 一鍵重新生成
+**分散式滑動視窗限流**：可插拔 `RateLimiterBackend` — `InMemoryBackend`（預設，單行程）與 `RedisBackend`（多副本安全，Lua 原子操作 ZSET）。設定 `REDIS_URL` 啟用；Redis 不可達時自動回退到記憶體模式。
 
-### 安全加固
-- **CORS** — 環境感知,生產環境拒絕 `*`,強制 `https://`
-- **TLS** — HSTS 標頭(生產環境預設開啟)、HTTPS 重導中介層、安全 cookie 檢查
-- **JWT 金鑰輪換** — `AUTH_SECRETS="kid:secret,..."` 多金鑰,零停機滾動
-- **滑動視窗限流** — 按使用者 + 按作用域
-- **請求體大小限制**(預設 1MB)+ **請求中金鑰偵測**
-- **輸入清理** — Prompt 注入偵測(TrustLevel 感知)
+**OpenTelemetry FastAPI 自動埋點**：當 `AGENT_OTEL_ENABLED=true` 時，啟動時自動呼叫 `FastAPIInstrumentor.instrument_app(app)`，每個請求發出按路由命名的 span。
 
-### 儲存與維運
-- **可插拔儲存** — JSON / SQLite / PostgreSQL
-- **備份子系統** — cron + SHA-256 清單 + tar.gz + DR 演練
-- **分散式鎖** — Redis 後端,記憶體兜底
-- **遷移 CLI** — 切換後端不丟資料
-- **多租戶隔離** — 6 空間隔離模型
-- **RBAC** — 6 個角色、7 個權限、權限組覆寫
+**PostgreSQL 列級安全（RLS）**：租戶隔離在資料庫 Schema 層強制實施。`RLS_MIGRATION_SQL`（冪等）加入 `tenant_id` 欄位、索引和 RLS 策略。預設 fail-closed。`set_tenant_id()` + `_conn_with_tenant()` 每次連線 checkout 時設定 GUC。跨租戶管理員使用 `BYPASSRLS` 角色。
 
-### 開發者體驗
-- **生產部署指南** — [docs/PRODUCTION.md](docs/PRODUCTION.md)(11KB,15 章節)
-- **故障回應手冊** — [docs/RUNBOOK.md](docs/RUNBOOK.md)
-- **發佈說明** — [RELEASE_NOTES.md](RELEASE_NOTES.md)
-- **CI 閘門** — 生產就緒測試套件阻擋低品質 PR
+**WebSocket 串流 LLM**：`/api/ws/llm/stream?token=&prompt=&system=` 升級 WebSocket 並逐 token 發出文字增量。`LLMRouter.stream_chunks()` 支援 Anthropic 和 OpenAI 相容提供商。15 秒心跳偵測；用戶端斷連時自動取消。
 
----
+### v0.1.0 — 初始发布
 
 ## API 端點
 
