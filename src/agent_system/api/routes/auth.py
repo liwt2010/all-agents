@@ -1,7 +1,12 @@
-"""Auth endpoints - JWT token issuance for testing/development.
+"""Auth endpoints - JWT token issuance + JWKS public key distribution.
 
-NOTE: In production, replace with SSO/OIDC integration.
-This endpoint is for local development and integration testing only.
+NOTE: /api/auth/token is for local development and integration testing only.
+In production, replace with SSO/OIDC integration.
+
+`/api/auth/jwks` exposes the public verify keys (RFC 7517) so external
+services can verify tokens issued by this server. Only relevant when
+AuthService is configured with RS256 keys (AUTH_PRIVATE_KEY env or
+explicit `private_key_pem` arg).
 """
 from __future__ import annotations
 
@@ -44,3 +49,15 @@ async def issue_token(req: TokenRequest) -> TokenResponse:
         ttl=ttl,
     )
     return TokenResponse(access_token=token, expires_in=ttl)
+
+
+@router.get("/api/auth/jwks")
+async def jwks() -> dict[str, list[dict[str, str]]]:
+    """Return the JSON Web Key Set (RFC 7517) for the public verify keys.
+
+    External services can fetch this once, cache the keys, and verify
+    tokens issued by this server without sharing any secret. For HS256
+    deployments this returns an empty key set — symmetric secrets must
+    never be published.
+    """
+    return get_auth_service_singleton().get_jwks()
