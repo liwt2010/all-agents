@@ -3,7 +3,7 @@
 [![CI](https://github.com/liwt2010/all-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/liwt2010/all-agents/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![v0.1.0](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/liwt2010/all-agents/releases/tag/v0.1.0)
+[![v0.3.0](https://img.shields.io/badge/release-v0.3.0-blue)](https://github.com/liwt2010/all-agents/releases/tag/v0.3.0)
 
 > **企业级多智能体编排平台** — 生产级 AI 智能体系统,具备共享记忆、Schema 宽容、数据溯源、分布式追踪、OpenAPI/SDK 自动生成、端到端可观测性。
 
@@ -298,13 +298,21 @@ pytest tests/test_production_readiness.py -v
 
 ## 路线图 (v0.2.0+)
 
-- [ ] **RS256 JWT**(多签发方 / 大规模多租户)
-- [ ] **Redis 后端限流**(多副本)
-- [ ] **PostgreSQL 行级安全**(Schema 层按租户隔离)
-- [ ] **OpenTelemetry FastAPI 自动埋点**(按路由粒度)
-- [ ] **通过 WebSocket 流式 LLM 响应**
-- [ ] **GitHub App 集成**(自动 PR 审查)
-- [ ] **自定义 Agent 市场**(可分享模板)
+- ✅ **RS256 JWT**(多签发方 / 大规模多租户)
+- ✅ **Redis 后端限流**(多副本)
+- ✅ **PostgreSQL 行级安全**(Schema 层按租户隔离)
+- ✅ **OpenTelemetry FastAPI 自动埋点**(按路由粒度)
+- ✅ **通过 WebSocket 流式 LLM 响应**
+- ✅ **GitHub App 集成**(自动 PR 审查)
+- ✅ **自定义 Agent 市场**(可分享模板)
+
+### 前瞻规划 (post-v0.3.0)
+
+- **函数调用 / 工具调用的流式**（目前仅文本）
+- **多租户 Custom Agent 市场 UI** — 用于浏览/上传自定义 Agent 的 Web 前端
+- **HL7 / FHIR 适配器** — 医疗数据格式集成
+- **原生 gRPC 服务器** 与 REST/WS API 并列
+- **分布式任务队列** — 当前为单进程执行;添加 Celery/RQ 支持高吞吐
 
 ---
 
@@ -316,9 +324,15 @@ MIT — 见 [LICENSE](LICENSE)。
 
 ## 发布历史
 
-- **v0.1.0** (2026-07-09) — 首个生产级发布
-  - 交付 22 个 PR,367 个测试通过
-  - OpenAPI + Python/TypeScript SDK 自动生成
-  - OpenTelemetry 分布式追踪
-  - CORS / TLS / JWT 密钥轮换加固
-  - 完整内容见 [RELEASE_NOTES.md](RELEASE_NOTES.md)
+- **v0.3.0** (2026-07-22) — 自定义 Agent 市场 + GitHub App
+- **v0.2.0** (2026-07-22) — 生产强化里程碑(RS256 JWT、Redis 限流、PostgreSQL RLS、OTel FastAPI 自动埋点、WebSocket 流式 LLM)
+- **v0.1.1** (2026-07-22) — Bug 修复 + 类型现代化(84 文件)
+- **v0.1.0** (2026-07-09) — 首个生产级发布(22 个 PR,367 个测试通过)
+
+完整内容见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+
+## 当前状态 (v0.3.0)
+
+- **1012** 测试通过,**5** 跳过(WebSocket TestClient 框架限制),**2** xfail
+- **3** 个 known failure 在 test_*real_llm.py — 无 ANTHROPIC_API_KEY 时跳过
+- 详细测试统计与历史回归趋势见 [STATUS.md](STATUS.md)

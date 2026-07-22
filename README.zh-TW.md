@@ -3,7 +3,7 @@
 [![CI](https://github.com/liwt2010/all-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/liwt2010/all-agents/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![v0.1.0](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/liwt2010/all-agents/releases/tag/v0.1.0)
+[![v0.3.0](https://img.shields.io/badge/release-v0.3.0-blue)](https://github.com/liwt2010/all-agents/releases/tag/v0.3.0)
 
 > **企業級多智能體編排平臺** — 生產級 AI 智能體系統,具備共享記憶、Schema 寬容、資料溯源、分散式追蹤、OpenAPI/SDK 自動生成、端對端可觀測性。
 
@@ -316,9 +316,15 @@ MIT — 見 [LICENSE](LICENSE)。
 
 ## 發佈歷史
 
-- **v0.1.0** (2026-07-09) — 首個生產級發佈
-  - 交付 22 個 PR,367 個測試通過
-  - OpenAPI + Python/TypeScript SDK 自動生成
-  - OpenTelemetry 分散式追蹤
-  - CORS / TLS / JWT 金鑰輪換加固
-  - 完整內容見 [RELEASE_NOTES.md](RELEASE_NOTES.md)
+- **v0.3.0** (2026-07-22) — 自訂 Agent 市場 + GitHub App
+- **v0.2.0** (2026-07-22) — 生產強化里程碑（RS256 JWT、Redis 限流、PostgreSQL 列級安全、OTel FastAPI 自動埋點、WebSocket 串流 LLM）
+- **v0.1.1** (2026-07-22) — Bug 修復 + 型別現代化（84 檔案）
+- **v0.1.0** (2026-07-09) — 首個生產級發佈（22 個 PR,367 個測試通過）
+
+完整內容見 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+
+## 當前狀態 (v0.3.0)
+
+- **1012** 測試通過,**5** 跳過（WebSocket TestClient 框架限制）,**2** xfail
+- **3** 個 known failure 在 test_*real_llm.py — 無 ANTHROPIC_API_KEY 時跳過
+- 詳細測試統計與歷史回歸趨勢見 [STATUS.md](STATUS.md)

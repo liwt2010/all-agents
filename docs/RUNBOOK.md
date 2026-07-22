@@ -7,11 +7,12 @@
 
 ## Overview
 
-The Agent System is a multi-tenant enterprise platform with 8 agents
-(Product, Tech, Test, Deploy, DevOps, Security, Docs, Review) plus
-CEO. It uses FastAPI + React + LangGraph, with optional Postgres /
-Redis backends. The default deployment is container-based (Docker /
-k8s), see PRODUCTION.md for installation.
+The Agent System is a multi-tenant enterprise platform with 9 built-in
+agents (Product, Tech, Test, Deploy, CEO, Security, Docs, Review, DevOps)
+plus a Custom Agent marketplace. It uses FastAPI + Pydantic v2 +
+SQLAlchemy 2.0, with optional Postgres / Redis backends. The default
+deployment is container-based (Docker / k8s), see PRODUCTION.md for
+installation.
 
 ## RTO / RPO targets
 

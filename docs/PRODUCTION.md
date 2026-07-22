@@ -575,6 +575,8 @@ Full procedures in `RUNBOOK.md`.
 
 ## 15. Versioning
 
-This document applies to all-agents `v0.1.0` and later. See `CHANGELOG.md`
+This document applies to all-agents `v0.3.0` and later (covers
+RS256 JWT, Redis rate limiting, PostgreSQL RLS, WebSocket streaming,
+GitHub App integration, Custom Agent marketplace). See `CHANGELOG.md`
 for release notes. For changes, edit this file and update the "Status"
 header at the top.

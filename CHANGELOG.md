@@ -1,13 +1,33 @@
 ﻿# Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+All notable changes to this project are documented in this file.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the user-facing summary
+of each release.
 
 ## [Unreleased]
 
 ### Added
+- *(none yet — please add entries here when landing a change)*
+
+### Changed
+- *(none yet)*
+
+### Fixed
+- *(none yet)*
+
+### Deprecated
+- *(none yet)*
+
+### Removed
+- *(none yet)*
+
+### Security
+- *(none yet)*
+
+---
 - **Distributed rate limiter backend (PR v0.2.0)**: pluggable
   `RateLimiterBackend` protocol with two implementations:
   - `InMemoryBackend` — async, asyncio.Lock-protected. Default for
@@ -207,6 +227,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **mypy strict on core modules**: Added overrides for `core/`, `memory/`, `storage/`
 - **UP006/UP045 batch fix**: 72 files modernized `List[X]` → `list[X]`
 - **Pydantic V2 migration**: `class Config` → `model_config = ConfigDict(...)` in `dataview.py`
+
+## [0.3.0] — 2026-07-22 (Custom Agent marketplace + GitHub App)
+
+See [RELEASE_NOTES.md](RELEASE_NOTES.md#v030--2026-07-22-github-app-integration--roadmap-pull-forward)
+for the full breakdown. Headline changes:
+
+### Added
+- **Custom Agent marketplace** — YAML-defined agents per tenant
+  (`load_from_yaml_file` / `load_from_directory`), HTTP API at
+  `/api/custom-agents` (list / get / run / upload / delete),
+  multi-tenant scoped, admin role required for upload/delete.
+- **GitHub App webhook integration** — `POST /api/webhooks/github`
+  with HMAC-SHA256 signature verification, `X-GitHub-Delivery`
+  replay protection (LRU 1000), and `ReviewAgent` auto-dispatch on
+  `pull_request` opened/synchronize/reopened. Optional
+  `GITHUB_PR_COMMENT_TOKEN` posts review back as PR comment.
+
+### Documentation
+- 4 ADRs added to `docs/adr/`: template, RS256 JWT, PostgreSQL
+  RLS, GitHub webhook.
+- `examples/custom-agents/`: `translator.yaml`, `pr-summarizer.yaml`.
+
+## [0.2.0] — 2026-07-22 (Production-hardening milestone)
+
+See [RELEASE_NOTES.md](RELEASE_NOTES.md#v020--2026-07-22-production-hardening-milestone)
+for the full breakdown. Five PRs closing the v0.2.0 roadmap:
+
+### Added
+- **RS256 JWT + JWKS endpoint** — `AuthService` auto-detects
+  algorithm from env. `AUTH_PRIVATE_KEY` / `AUTH_PUBLIC_KEYS` /
+  `AUTH_SIGNING_KID`. `GET /api/auth/jwks` (RFC 7517) for external
+  verifiers. `scripts/gen_rsa_keys.py` for keypair generation.
+- **Redis-backed rate limit** — `RateLimiterBackend` protocol
+  with `InMemoryBackend` (default) and `RedisBackend` (Lua-atomic).
+  `REDIS_URL` activates; falls back to in-memory on Redis outage.
+- **PostgreSQL Row-Level Security** — tenant_id columns + RLS
+  policies on `graph_nodes` / `graph_links`. `set_tenant_id()`
+  + `_conn_with_tenant()` per-connection GUC. Fail-closed.
+- **OpenTelemetry FastAPI auto-instrumentation** — when
+  `AGENT_OTEL_ENABLED=true`, lifespan calls
+  `FastAPIInstrumentor.instrument_app(app)` for per-route spans.
+- **WebSocket streaming LLM** — `/api/ws/llm/stream` with
+  `LLMRouter.stream_chunks()` async generator. Anthropic +
+  OpenAI-compatible. Wire format: chunk / done / error / ping.
+
+### Tests
+- +102 new tests across the 5 PRs (17 + 21 + 15 + 5 + 2 router-level
+  + 5 endpoint WS skipped due to TestClient framework bug).
+
+## [0.1.1] — 2026-07-22 (Bug fixes + typing sweep)
+
+Post-v0.1.0 audit surfaced 11 actual test failures (despite STATUS.md
+claiming "0 known failures"). This release repairs them.
+
+### Fixed
+- **`notify.py` async-handler exceptions silently dropped** — now
+  uses `add_done_callback` to surface failures.
+- **CI `|| true` removed** — ruff advisory check no longer swallows
+  exit code.
+- **Python 3.11 f-string syntax** — `test_performance_agent.py`
+  dict access in f-strings.
+- **8 boundary tests repaired** — memory disabled, tenant
+  isolation, schema provenance, JWT rotation, LLM errors.
+
+### Changed
+- **UP006/UP045 typing modernization (full sweep)** — all 84
+  remaining `src/` files migrated from `typing.Dict/List/Optional/Tuple`
+  to PEP 585 / PEP 604 lowercase forms.
+
+### Security
+- **pip-audit added to CI**, **Dependabot config**, **SECURITY.md**
+  vulnerability reporting policy, **pre-commit hooks** with
+  `check_no_secrets.py`.
 
 ## [0.1.0] — 2026-07-09
 
