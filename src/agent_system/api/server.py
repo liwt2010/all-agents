@@ -35,6 +35,7 @@ from agent_system.api.routes import (
     auth_router,
     graph_router,
     health_router,
+    llm_stream_router,
     metrics_router,
     tasks_router,
 )
@@ -249,3 +250,4 @@ app.include_router(agents_router)
 app.include_router(graph_router)
 app.include_router(metrics_router)
 app.include_router(audit_router)
+app.include_router(llm_stream_router)

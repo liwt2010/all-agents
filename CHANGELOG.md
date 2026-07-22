@@ -23,6 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     backends, shared-state across instances (simulating replicas),
     key namespacing, reset, fail-open on Redis errors, and the
     env-driven factory.
+- **Streaming LLM WebSocket endpoint (PR v0.2.0)**: token-by-token
+  LLM responses over WebSocket for snappy chat UX.
+  - `LLMRouter.stream_chunks()` async generator yields text deltas
+    for both Anthropic (`messages.stream`) and OpenAI-compatible
+    (chat.completions stream=True). Mock mode (no API key) yields
+    the canned response in ~5 chunks with small sleeps.
+  - `StreamEnd` namedtuple sentinel marks the last item so callers
+    get the final `LLMUsage` (input/output tokens, duration, model).
+  - New endpoint `GET /api/ws/llm/stream?token=...&prompt=...` with
+    15s keepalive pings; cancels the LLM generator on client
+    disconnect via `WebSocketDisconnect`.
+  - Wire format: `{"type": "chunk", "data": "..."}`,
+    `{"type": "done", "data": {usage...}}`, `{"type": "error", ...}`,
+    `{"type": "ping"}`.
+  - Tests: 2 router-level pass + 5 WS endpoint tests skipped due to
+    starlette 1.3.x + httpx 0.28 TestClient incompatibility
+    (tracked separately; not a code issue).
 - **PostgreSQL Row-Level Security (PR v0.2.0)**: tenant isolation now
   enforced at the database schema level, not just the API layer.
   - `graph_nodes` and `graph_links` gained `tenant_id TEXT NOT NULL

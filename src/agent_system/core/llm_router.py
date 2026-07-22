@@ -693,6 +693,160 @@ class LLMRouter:
             mock=True,
         )
 
+    # ── Streaming (PR v0.2.0) ──
+
+    async def stream_chunks(
+        self,
+        config: LLMConfig,
+        system_prompt: str,
+        messages: list,
+        _agent_name: str | None = None,
+        _task_id: str | None = None,
+    ):
+        """Async generator yielding text chunks as the LLM produces them.
+
+        Each yield is a `str` — typically a few tokens at a time. On
+        completion, the final chunk is a sentinel: a `StreamEnd`
+        namedtuple with the aggregated `LLMUsage` so callers can
+        report metrics.
+
+        Why a sentinel rather than a separate "end" event? Because it
+        keeps the contract single-channel (text only) — WebSocket
+        consumers and async-for loops both get a clean "is the last
+        item a string or a StreamEnd?" check.
+
+        Mock mode yields the canned response in 5 chunks with a small
+        sleep so consumers can observe streaming behavior in tests
+        without needing an API key.
+        """
+        from collections import namedtuple
+        StreamEnd = namedtuple("StreamEnd", ["usage"])
+
+        if _agent_name or _task_id:
+            set_llm_context(
+                _agent_name or _current_agent.get(),
+                _task_id or _current_task.get(),
+            )
+
+        if self.is_mock_mode:
+            full, usage = self._mock_response(system_prompt, messages)
+            # Split into ~5 chunks of similar length
+            chunks = [full[i:i + max(1, len(full) // 5)]
+                      for i in range(0, len(full), max(1, len(full) // 5))]
+            for c in chunks:
+                await asyncio.sleep(0.01)
+                yield c
+            yield StreamEnd(usage=usage)
+            return
+
+        if self.llm_provider == "anthropic":
+            async for item in self._stream_anthropic(config, system_prompt, messages):
+                yield item
+            return
+
+        if self.llm_provider == "openai":
+            async for item in self._stream_openai(config, system_prompt, messages):
+                yield item
+            return
+
+        # Unknown provider — degrade to mock
+        full, usage = self._mock_response(system_prompt, messages)
+        yield full
+        yield StreamEnd(usage=usage)
+
+    async def _stream_anthropic(self, config, system_prompt, messages):
+        """Yield text chunks from the Anthropic streaming API.
+
+        The Anthropic SDK exposes `client.messages.stream(...)` returning
+        an async-iterable `MessageStreamManager`. Each `text` event
+        gives a small text delta.
+        """
+        from collections import namedtuple
+        StreamEnd = namedtuple("StreamEnd", ["usage"])
+
+        client = self.get_anthropic_client()
+        if not client:
+            full, usage = self._mock_response(system_prompt, messages)
+            yield full
+            yield StreamEnd(usage=usage)
+            return
+
+        system_prompt, messages = self._truncate_messages(
+            system_prompt, messages, config.model,
+            reserve_output_tokens=config.max_tokens,
+        )
+        params = self._build_anthropic_params(config, system_prompt, messages, tools=None)
+        usage_total = LLMUsage(model=config.model, mock=False)
+        t0 = time.time()
+        try:
+            async with client.messages.stream(**params) as stream:
+                async for text in stream.text_stream:
+                    if text:
+                        yield text
+                # text_stream ends when the message is complete; pull
+                # the final message for usage metrics.
+                final = await stream.get_final_message()
+                usage_total.input_tokens = final.usage.input_tokens
+                usage_total.output_tokens = final.usage.output_tokens
+                if hasattr(final.usage, "cache_read_input_tokens"):
+                    usage_total.cache_read_tokens = final.usage.cache_read_input_tokens or 0
+                if hasattr(final.usage, "cache_creation_input_tokens"):
+                    usage_total.cache_creation_tokens = final.usage.cache_creation_input_tokens or 0
+        except Exception as e:
+            logger.error(f"Anthropic streaming failed: {e}")
+            yield f"[stream error: {e}]"
+        usage_total.duration_ms = (time.time() - t0) * 1000.0
+        usage_total.cost_estimate = self._estimate_cost(
+            usage_total.input_tokens, usage_total.output_tokens, config.model
+        )
+        yield StreamEnd(usage=usage_total)
+
+    async def _stream_openai(self, config, system_prompt, messages):
+        """Yield text chunks from the OpenAI-compatible streaming API."""
+        from collections import namedtuple
+        StreamEnd = namedtuple("StreamEnd", ["usage"])
+
+        client = self.get_openai_client()
+        if not client:
+            full, usage = self._mock_response(system_prompt, messages)
+            yield full
+            yield StreamEnd(usage=usage)
+            return
+
+        openai_messages = []
+        if system_prompt:
+            openai_messages.append({"role": "system", "content": system_prompt})
+        openai_messages.extend(messages)
+
+        kwargs = {
+            "model": config.model,
+            "max_tokens": config.max_tokens,
+            "temperature": config.temperature,
+            "messages": openai_messages,
+            "stream": True,
+        }
+        usage_total = LLMUsage(model=config.model, mock=False)
+        t0 = time.time()
+        try:
+            stream = await client.chat.completions.create(**kwargs)
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta and getattr(delta, "content", None):
+                    yield delta.content
+                if hasattr(chunk, "usage") and chunk.usage:
+                    usage_total.input_tokens = chunk.usage.prompt_tokens or 0
+                    usage_total.output_tokens = chunk.usage.completion_tokens or 0
+        except Exception as e:
+            logger.error(f"OpenAI streaming failed: {e}")
+            yield f"[stream error: {e}]"
+        usage_total.duration_ms = (time.time() - t0) * 1000.0
+        usage_total.cost_estimate = self._estimate_cost(
+            usage_total.input_tokens, usage_total.output_tokens, config.model
+        )
+        yield StreamEnd(usage=usage_total)
+
 
 # Global router instance
 router = LLMRouter()

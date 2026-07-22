@@ -11,12 +11,14 @@ Layout:
     - graph.py     memory graph query
     - metrics.py   metrics (JSON + Prometheus)
     - audit.py     audit log query
+    - llm_stream.py  streaming LLM WebSocket
 """
 from agent_system.api.routes.agents import router as agents_router
 from agent_system.api.routes.audit import router as audit_router
 from agent_system.api.routes.auth import router as auth_router
 from agent_system.api.routes.graph import router as graph_router
 from agent_system.api.routes.health import router as health_router
+from agent_system.api.routes.llm_stream import router as llm_stream_router
 from agent_system.api.routes.metrics import router as metrics_router
 from agent_system.api.routes.tasks import router as tasks_router
 
@@ -26,6 +28,7 @@ __all__ = [
     "auth_router",
     "graph_router",
     "health_router",
+    "llm_stream_router",
     "metrics_router",
     "tasks_router",
 ]
