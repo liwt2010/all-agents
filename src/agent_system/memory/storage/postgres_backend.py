@@ -66,6 +66,41 @@ CREATE INDEX IF NOT EXISTS idx_links_type ON graph_links(link_type);
 """
 
 
+# Migration that adds tenant_id columns + Row-Level Security policies.
+# Idempotent: safe to run on every init() call.
+# Pre-condition: SCHEMA_SQL has already created the base tables.
+RLS_MIGRATION_SQL = """
+-- Add tenant_id columns (default 'default' so existing rows remain visible)
+ALTER TABLE graph_nodes
+    ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE graph_links
+    ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default';
+
+CREATE INDEX IF NOT EXISTS idx_nodes_tenant ON graph_nodes(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_links_tenant ON graph_links(tenant_id);
+
+-- Enable RLS on both tables. Tables whose owner is the migration
+-- connection bypass RLS by default (FORCE ROW LEVEL SECURITY makes it
+-- apply even to the owner) — opt-in by setting FORCE=true below if
+-- you want strict enforcement for the application role too.
+ALTER TABLE graph_nodes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE graph_links ENABLE ROW LEVEL SECURITY;
+
+-- Policy: visible only when row's tenant_id matches the GUC. The 'true'
+-- argument to current_setting() returns NULL (treated as no-match) when
+-- the GUC is unset — so without an explicit SET, RLS hides everything.
+DROP POLICY IF EXISTS tenant_isolation_nodes ON graph_nodes;
+CREATE POLICY tenant_isolation_nodes ON graph_nodes
+    USING (tenant_id = current_setting('app.current_tenant', true))
+    WITH CHECK (tenant_id = current_setting('app.current_tenant', true));
+
+DROP POLICY IF EXISTS tenant_isolation_links ON graph_links;
+CREATE POLICY tenant_isolation_links ON graph_links
+    USING (tenant_id = current_setting('app.current_tenant', true))
+    WITH CHECK (tenant_id = current_setting('app.current_tenant', true));
+"""
+
+
 class PostgresBackend:
     """PostgreSQL-backed graph storage with connection pooling."""
 
@@ -100,6 +135,9 @@ class PostgresBackend:
             password=password,
         )
         self._psycopg2_extras = psycopg2.extras
+        # Default tenant until caller calls set_tenant_id(). With no
+        # tenant set, RLS hides all rows — fail-closed by default.
+        self._current_tenant: str = "default"
 
     def backend_name(self) -> str:
         return f"postgres:{self.pool._conn_kwargs.get('database', '?')}"
@@ -123,11 +161,62 @@ class PostgresBackend:
         finally:
             self.pool.putconn(conn)
 
+    def set_tenant_id(self, tenant_id: str) -> None:
+        """Bind `tenant_id` for every subsequent query on this backend's
+        pooled connections.
+
+        The GUC is set on the *pool* (which lives for the lifetime of
+        this backend) and the change is committed. PostgreSQL GUCs are
+        per-session — each pooled connection inherits it. For safety
+        we reset it on every connection checkout (see `_conn_with_tenant`).
+
+        Typical use:
+            backend = PostgresBackend(...)
+            backend.init()
+            backend.set_tenant_id("acme")
+            backend.save_node(node)
+        """
+        # Validate at API boundary — refuse suspicious tenant ids early
+        if not tenant_id or not isinstance(tenant_id, str):
+            raise ValueError("tenant_id must be a non-empty string")
+        if len(tenant_id) > 128:
+            raise ValueError("tenant_id too long (max 128 chars)")
+        # The actual SET happens per-connection in _conn_with_tenant; here
+        # we just record the desired value.
+        self._current_tenant = tenant_id
+
+    @contextmanager
+    def _conn_with_tenant(self):
+        """Like _conn() but pins app.current_tenant for the duration of
+        the connection. Pairs with set_tenant_id(); without that call,
+        the GUC is left unset and RLS hides all rows (fail-closed)."""
+        conn = self.pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT set_config('app.current_tenant', %s, true)",
+                    (self._current_tenant,),
+                )
+            conn.commit()
+            yield conn
+        finally:
+            self.pool.putconn(conn)
+
     def init(self) -> None:
-        """Create tables and indexes (idempotent)."""
+        """Create tables, indexes, and RLS policies (idempotent).
+
+        The schema migration runs in two steps:
+          1. SCHEMA_SQL — base tables + indexes (IF NOT EXISTS, no-op
+             on second call).
+          2. RLS_MIGRATION_SQL — tenant_id columns + RLS policies.
+             ADD COLUMN IF NOT EXISTS makes this safe to re-run.
+        """
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(SCHEMA_SQL)
+                # RLS migration: requires the base tables to exist, so
+                # it must run AFTER SCHEMA_SQL.
+                cur.execute(RLS_MIGRATION_SQL)
             conn.commit()
 
     def close(self) -> None:
@@ -163,12 +252,12 @@ class PostgresBackend:
 
     @track_storage(backend="postgres", op="save_node")
     def save_node(self, node: GraphNode) -> None:
-        with self._conn() as conn:
+        with self._conn_with_tenant() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO graph_nodes (id, type, content, metadata, created_at, updated_at)
-                    VALUES (%s, %s, %s::jsonb, %s::jsonb, %s, %s)
+                    INSERT INTO graph_nodes (id, type, content, metadata, created_at, updated_at, tenant_id)
+                    VALUES (%s, %s, %s::jsonb, %s::jsonb, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE SET
                         type = EXCLUDED.type,
                         content = EXCLUDED.content,
@@ -182,12 +271,13 @@ class PostgresBackend:
                         json.dumps(node.metadata, default=str),
                         node.created_at,
                         node.updated_at,
+                        self._current_tenant,
                     ),
                 )
             conn.commit()
 
     def load_node(self, node_id: str) -> GraphNode | None:
-        with self._conn() as conn:
+        with self._conn_with_tenant() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT id, type, content, metadata, created_at, updated_at "
@@ -198,7 +288,7 @@ class PostgresBackend:
                 return self._row_to_node(row) if row else None
 
     def delete_node(self, node_id: str) -> bool:
-        with self._conn() as conn:
+        with self._conn_with_tenant() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM graph_nodes WHERE id = %s", (node_id,))
                 # FK CASCADE removes links automatically
@@ -207,7 +297,7 @@ class PostgresBackend:
             return deleted
 
     def list_nodes(self, node_type: NodeType | None = None) -> list[GraphNode]:
-        with self._conn() as conn:
+        with self._conn_with_tenant() as conn:
             with conn.cursor() as cur:
                 if node_type:
                     cur.execute(
@@ -225,13 +315,13 @@ class PostgresBackend:
     # ── Link operations ──
 
     def save_link(self, link: GraphLink) -> None:
-        with self._conn() as conn:
+        with self._conn_with_tenant() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     INSERT INTO graph_links
-                        (source_id, target_id, link_type, weight, context, created_at, created_by)
-                    VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)
+                        (source_id, target_id, link_type, weight, context, created_at, created_by, tenant_id)
+                    VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s)
                     ON CONFLICT (source_id, target_id, link_type) DO UPDATE SET
                         weight = EXCLUDED.weight,
                         context = EXCLUDED.context
@@ -244,6 +334,7 @@ class PostgresBackend:
                         json.dumps(link.context, default=str),
                         link.created_at,
                         link.created_by,
+                        self._current_tenant,
                     ),
                 )
             conn.commit()
@@ -254,7 +345,7 @@ class PostgresBackend:
         direction: str = "out",
         link_type: str | None = None,
     ) -> list[GraphLink]:
-        with self._conn() as conn:
+        with self._conn_with_tenant() as conn:
             with conn.cursor() as cur:
                 if direction == "out":
                     sql = (
@@ -282,7 +373,7 @@ class PostgresBackend:
                 return [self._row_to_link(row) for row in rows]
 
     def delete_links_for_node(self, node_id: str) -> int:
-        with self._conn() as conn:
+        with self._conn_with_tenant() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM graph_links WHERE source_id = %s OR target_id = %s",
@@ -297,14 +388,14 @@ class PostgresBackend:
     def save_graph(self, graph: "MultiLinkGraph") -> int:
         """Save entire graph atomically in a single transaction."""
         nodes = graph.find_nodes()
-        with self._conn() as conn:
+        with self._conn_with_tenant() as conn:
             try:
                 with conn.cursor() as cur:
                     for node in nodes:
                         cur.execute(
                             """
-                            INSERT INTO graph_nodes (id, type, content, metadata, created_at, updated_at)
-                            VALUES (%s, %s, %s::jsonb, %s::jsonb, %s, %s)
+                            INSERT INTO graph_nodes (id, type, content, metadata, created_at, updated_at, tenant_id)
+                            VALUES (%s, %s, %s::jsonb, %s::jsonb, %s, %s, %s)
                             ON CONFLICT (id) DO UPDATE SET
                                 type = EXCLUDED.type,
                                 content = EXCLUDED.content,
@@ -316,6 +407,7 @@ class PostgresBackend:
                                 json.dumps(node.content, default=str),
                                 json.dumps(node.metadata, default=str),
                                 node.created_at, node.updated_at,
+                                self._current_tenant,
                             ),
                         )
                     for source_id, links in graph._outgoing.items():
@@ -323,8 +415,8 @@ class PostgresBackend:
                             cur.execute(
                                 """
                                 INSERT INTO graph_links
-                                    (source_id, target_id, link_type, weight, context, created_at, created_by)
-                                VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)
+                                    (source_id, target_id, link_type, weight, context, created_at, created_by, tenant_id)
+                                VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s)
                                 ON CONFLICT (source_id, target_id, link_type) DO UPDATE SET
                                     weight = EXCLUDED.weight,
                                     context = EXCLUDED.context
@@ -334,6 +426,7 @@ class PostgresBackend:
                                     link.weight,
                                     json.dumps(link.context, default=str),
                                     link.created_at, link.created_by,
+                                    self._current_tenant,
                                 ),
                             )
                 conn.commit()
@@ -350,7 +443,7 @@ class PostgresBackend:
         for node in nodes:
             graph.add_node(node)
 
-        with self._conn() as conn:
+        with self._conn_with_tenant() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT source_id, target_id, link_type, weight, context, created_at, created_by "

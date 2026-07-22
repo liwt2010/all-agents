@@ -23,6 +23,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     backends, shared-state across instances (simulating replicas),
     key namespacing, reset, fail-open on Redis errors, and the
     env-driven factory.
+- **PostgreSQL Row-Level Security (PR v0.2.0)**: tenant isolation now
+  enforced at the database schema level, not just the API layer.
+  - `graph_nodes` and `graph_links` gained `tenant_id TEXT NOT NULL
+    DEFAULT 'default'` columns with supporting indexes.
+  - RLS policies (`tenant_isolation_nodes` / `tenant_isolation_links`)
+    filter rows to the GUC `app.current_tenant`. Connections without
+    a SET see no rows (fail-closed default).
+  - `PostgresBackend.set_tenant_id(tenant_id)` validates the input
+    and pins the GUC per-connection via `SELECT set_config(...)`
+    in `_conn_with_tenant()`.
+  - All data operations (`save_node`, `save_link`, `save_graph`,
+    `load_*`, `list_*`, `delete_*`) now write/read through
+    `_conn_with_tenant()` so the GUC is set before the query.
+  - Migration (`RLS_MIGRATION_SQL`) is idempotent — safe to re-run
+    on every `init()`.
+  - Cross-tenant admin access: connect as a user with `BYPASSRLS`
+    attribute, or call `set_config('app.current_tenant', ..., false)`
+    on the pool directly.
+  - Tests: 15 new in `test_storage_rls.py` cover migration surface,
+    tenant-id validation, GUC emission, and the cross-tenant
+    isolation contract (simulated against sqlite for portability).
 - **OpenTelemetry FastAPI auto-instrumentation (PR v0.2.0)**: when
   `AGENT_OTEL_ENABLED=true`, the lifespan automatically calls
   `FastAPIInstrumentor.instrument_app(app)` after `init_otel_exporter()`

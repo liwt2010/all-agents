@@ -243,3 +243,68 @@ PR 9 完成后再考虑：
 | 数据迁移失败 | 高 | 迁移前自动 backup + dry-run 模式 |
 | 后端 bug 导致数据丢失 | 高 | 持久化层测试覆盖率 90%+ |
 | PostgreSQL 依赖不可用 | 低 | graceful fallback 到 SQLite（warning log）|
+---
+
+## 11. 多租户隔离（PostgreSQL Row-Level Security）
+
+从 v0.2.0 起，PostgreSQL 后端通过 RLS 策略在数据库层强制多租户
+隔离，不再依赖 API 层的 `WHERE tenant_id = ...` 过滤。
+
+### Schema
+
+`graph_nodes` 与 `graph_links` 都增加 `tenant_id TEXT NOT NULL DEFAULT 'default'`
+列。`init()` 自动运行 `RLS_MIGRATION_SQL`（幂等：可重复执行）。
+
+### RLS 策略
+
+```sql
+ALTER TABLE graph_nodes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE graph_links ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation_nodes ON graph_nodes
+    USING (tenant_id = current_setting('app.current_tenant', true))
+    WITH CHECK (tenant_id = current_setting('app.current_tenant', true));
+```
+
+`USING` 控制可见行（SELECT/DELETE 受影响），`WITH CHECK` 控制 INSERT/UPDATE
+时新行的 tenant_id 必须匹配。两次都引用同一个 GUC，避免 SELECT 看见的
+行与 INSERT 写入的行属于不同租户。
+
+### 应用层调用
+
+```python
+backend = PostgresBackend(...)
+backend.init()
+backend.set_tenant_id("acme")        # 写 GUC，校验 1-128 字符
+backend.save_node(node)              # _conn_with_tenant() 在每个查询前 SET
+```
+
+`_conn_with_tenant()` 在每个 pooled connection 取出时执行：
+
+```sql
+SELECT set_config('app.current_tenant', ?, true)   -- LOCAL=true 表示仅当前事务
+```
+
+`true`（LOCAL）让 GUC 在事务结束自动失效 — 避免一个连接的
+`acme` 状态泄漏到下一个 checkout。
+
+### Fail-closed 默认
+
+如果调用方忘记 `set_tenant_id()`，GUC 保持 unset 状态，
+`current_setting('app.current_tenant', true)` 返回 NULL，
+RLS 策略 `tenant_id = NULL` 永远不成立 → 该连接看不到任何行。
+
+### 跨租户管理操作
+
+迁移或跨租户批处理时不要 `set_tenant_id()`，改用：
+
+```sql
+ALTER ROLE all_agents_admin BYPASSRLS;
+```
+
+或直接在 `psql` 里 `SET ROLE all_agents_admin` 后操作。
+
+### SQLite 后端
+
+SQLite 无 RLS 概念。建议应用层（API 端点）继续按 `tenant_id` 过滤；
+或者迁移到 PG 后端以获得 schema 层强制保护。
