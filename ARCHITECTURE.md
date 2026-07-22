@@ -1,5 +1,22 @@
 # 企业级多 Agent 系统架构 v15.1
 
+> **⚠️ HISTORICAL DESIGN DOCUMENT — last edited before v0.1.0**
+>
+> This file is the original v1–v15.1 design history, frozen at
+> 51KB. For the **current code-level architecture** (modules,
+> data flow, integration points), see:
+> - [README.md](README.md#project-structure) — current module tree
+>   and feature inventory
+> - [docs/PRODUCTION.md](docs/PRODUCTION.md) — deployment architecture
+>   and operational concerns
+> - [docs/adr/](docs/adr/README.md) — table of contents for the
+>   4 ADRs (RS256 JWT, PostgreSQL RLS, GitHub webhook) that
+>   document the *why* of each major v0.2.0 / v0.3.0 decision
+>
+> If you want a full pass to bring this file up to date with the
+> v0.3.0 code, see [`docs/TODO.md`](docs/TODO.md) §"Known technical
+> debt — ARCHITECTURE.md".
+
 完整的架构设计文档，整合 v1-v15.1 所有讨论。
 
 > **v15.1 关键变化**：

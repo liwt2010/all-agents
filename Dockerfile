@@ -1,4 +1,21 @@
 # Agent System — Dockerfile
+# Targets Python 3.11 slim. Multi-arch: linux/amd64 + linux/arm64
+# built via `docker buildx build --platform linux/amd64,linux/arm64`.
+#
+# Build (single arch, no push):
+#   docker build -t agent-system:v0.3.0 .
+# Build + push multi-arch (requires `docker login`):
+#   docker buildx build --platform linux/amd64,linux/arm64 \
+#     -t liwt2010/all-agents:v0.3.0 --push .
+# Run with persisted data:
+#   docker run -d --name agent-system \
+#     -e AUTH_PRIVATE_KEY="$(cat /path/to/private.pem)" \
+#     -e AUTH_PUBLIC_KEYS="v1:$(cat /path/to/public.pem)" \
+#     -e ANTHROPIC_API_KEY=sk-xxx \
+#     -e REDIS_URL=redis://host:6379 \
+#     -p 8000:8000 \
+#     -v /var/lib/agent-system/data:/data \
+#     liwt2010/all-agents:v0.3.0
 FROM python:3.11-slim
 
 WORKDIR /app
