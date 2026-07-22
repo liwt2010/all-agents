@@ -23,6 +23,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     backends, shared-state across instances (simulating replicas),
     key namespacing, reset, fail-open on Redis errors, and the
     env-driven factory.
+- **GitHub App webhook integration (PR v0.3.0)**: when registered as
+  a GitHub App, the server receives `pull_request` webhooks and
+  automatically triggers `ReviewAgent` on `opened` / `synchronize` /
+  `reopened` actions.
+  - `POST /api/webhooks/github` — HMAC-SHA256 signature verified
+    via `X-Hub-Signature-256` (constant-time comparison). Raw body
+    is read before JSON parsing to preserve the byte sequence used
+    for the signature.
+  - Replay protection: `X-GitHub-Delivery` IDs cached in an LRU
+    (1000 entries). Duplicate deliveries return `{"status": "duplicate"}`
+    so the same payload isn't processed twice.
+  - Other event types (`push`, `issues`, `ping`, ...) acknowledged
+    with `{"status": "ignored"}` so GitHub doesn't retry.
+  - Background dispatch: PR review runs in `asyncio.create_task`
+    so the webhook responds within GitHub's 10s timeout; the LLM
+    call proceeds after the response is sent.
+  - Opt-in comment posting via `GITHUB_PR_COMMENT_TOKEN` env
+    (uses GitHub's `POST /repos/{o}/{r}/issues/{n}/comments` API).
+    When unset, review output is logged locally — staging-friendly.
+  - `GITHUB_WEBHOOK_SECRET` env required; returns 503 if unset
+    so misconfiguration is loud, not silent.
+  - Tests: 18 new in `test_github_webhook.py` cover signature
+    verification (valid/missing/wrong/tampered), replay dedupe,
+    event dispatch (PR opened/synchronize/reopened/closed/edited/assigned,
+    push, ping), missing-secret 503, and the unit-level HMAC helper.
 - **Streaming LLM WebSocket endpoint (PR v0.2.0)**: token-by-token
   LLM responses over WebSocket for snappy chat UX.
   - `LLMRouter.stream_chunks()` async generator yields text deltas

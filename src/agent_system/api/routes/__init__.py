@@ -12,10 +12,12 @@ Layout:
     - metrics.py   metrics (JSON + Prometheus)
     - audit.py     audit log query
     - llm_stream.py  streaming LLM WebSocket
+    - github_webhook.py  GitHub App webhook receiver
 """
 from agent_system.api.routes.agents import router as agents_router
 from agent_system.api.routes.audit import router as audit_router
 from agent_system.api.routes.auth import router as auth_router
+from agent_system.api.routes.github_webhook import router as github_webhook_router
 from agent_system.api.routes.graph import router as graph_router
 from agent_system.api.routes.health import router as health_router
 from agent_system.api.routes.llm_stream import router as llm_stream_router
@@ -26,6 +28,7 @@ __all__ = [
     "agents_router",
     "audit_router",
     "auth_router",
+    "github_webhook_router",
     "graph_router",
     "health_router",
     "llm_stream_router",
