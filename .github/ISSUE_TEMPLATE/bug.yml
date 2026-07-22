@@ -1,0 +1,44 @@
+---
+name: Bug report
+about: Report incorrect behavior or a regression
+title: ''
+labels: bug
+assignees: ''
+---
+
+## Summary
+
+<!-- One-paragraph description of what's wrong. -->
+
+## Reproduction
+
+### Environment
+
+- Version / commit: `v0.3.0` (or commit SHA)
+- Deployment: local / Docker / k8s
+- Python: 3.11 / 3.12
+- OS: linux / macOS / Windows
+- Storage backend: json / sqlite / postgres
+- LLM provider: anthropic / openai / mock
+
+### Steps to reproduce
+
+1.
+2.
+3.
+
+### Expected behavior
+
+### Actual behavior
+
+### Logs / stack trace
+
+```
+(paste here)
+```
+
+## Severity
+
+- [ ] Data loss / security (critical)
+- [ ] Functional regression (high)
+- [ ] Inconvenience / cosmetic (low)

@@ -49,3 +49,7 @@ htmlcov/
 openapi/openapi.json
 openapi/openapi.yaml
 sdks/
+
+# Sub-projects that should live in their own repos —
+# kept on disk for convenience but excluded from this repo.
+projects/

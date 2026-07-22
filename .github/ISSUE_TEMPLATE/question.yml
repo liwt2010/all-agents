@@ -1,0 +1,22 @@
+---
+name: Question
+about: Ask how to use or deploy the platform
+title: ''
+labels: question
+assignees: ''
+---
+
+## What I'm trying to do
+
+## What I tried
+
+## Environment
+
+- Version: v0.3.0
+- Deployment: local / Docker / k8s
+- Storage backend: json / sqlite / postgres
+- LLM provider: anthropic / openai / mock
+
+## Relevant docs I've read
+
+<!-- (links to README / docs/ that you've already tried) -->

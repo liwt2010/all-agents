@@ -1,0 +1,27 @@
+---
+name: Feature request
+about: Suggest a new capability
+title: ''
+labels: enhancement
+assignees: ''
+---
+
+## Problem
+
+<!-- What pain point does this address? Who has it? -->
+
+## Proposed solution
+
+<!-- How should this work? -->
+
+## Alternatives considered
+
+<!-- Other approaches you considered and why you rejected them. -->
+
+## Impact
+
+<!-- Users affected, behavior change, breaking? -->
+
+## Implementation notes
+
+<!-- Optional: link to ADRs, related code, related issues. -->
