@@ -24,8 +24,8 @@ a full CI/CD gate, observability stack, and operational runbook.
 | Source LOC (Python) | ~22,000 |
 | Built-in agents | **9** (Product, Tech, Test, Deploy, CEO, Security, Docs, Review, DevOps) |
 | Test files | 60+ |
-| Tests passing | **847** (plus 7 skipped, 36 pre-existing known failures) |
-| Known failures | **3** (test_task_store_integration: missing langgraph dep); 12 others (iterations, SDK gen) |
+| Tests collected | **920** (910 passed + 7 skipped + 2 xfail + 1 known-failure requires `ANTHROPIC_API_KEY`) |
+| Known failures | **1** (test_resolve_peer_handles_real_llm_failure_gracefully — skips locally without API key, passes in CI when key present) |
 | Production-grade hardening | CORS, TLS, JWT rotation, rate limit, audit, backup |
 | CI workflow | 2 jobs + manual dispatch (real-LLM smoke) |
 | Docker image | `liwt2010/all-agents:v0.1.0` (699MB, smoke-tested) |
@@ -163,11 +163,10 @@ Verified: `tests/test_storage.py`, `tests/test_backup.py`, `tests/test_redis_bac
 
 | Category | Count | Notes |
 |---|---|---|
-| Unit tests | **834 deterministic + ~26 real-LLM-marked** = **861 CI-collected** (run on every PR) | filter: `-m 'not real_llm' --ignore=3 files` |
-| Real-LLM E2E tests | **26** | Run manually / weekly; need `ANTHROPIC_API_KEY`. 3 files: `test_pipeline_e2e_real_llm.py`, `test_resolver_peer_real_llm.py`, `test_data_provenance.py` |
+| Unit tests (CI subset) | **910 passed** + 7 skipped + 2 xfail | Filter: `--ignore=tests/test_*real_llm.py` |
+| Real-LLM E2E tests | 1 collected | Requires `ANTHROPIC_API_KEY`; skipped locally without key |
 | Production-readiness gate | 42 | Static checks on artifacts |
-| **Full sweep collected** | **887** | 0 known failures (834+26+27 misc deterministic = 887 across 10 modules) |
-| Skipped | 2 | (deprecated paths) |
+| **Full sweep collected** | **920** | 910 passed + 7 skipped + 2 xfail + 1 real-LLM skip-without-key |
 
 ### Real-LLM Test Suite (9 tests, ~6 minutes total)
 
@@ -223,7 +222,7 @@ pip install -e ".[api,storage]"
 
 # Run unit tests (no key needed)
 pytest tests/ -q --ignore=tests/test_*real_llm.py
-# Expected: 861 collected (CI subset), 2 skipped (--ignore + marker)
+# Expected: 920 collected (910 passed + 7 skipped + 2 xfail + 1 real-LLM skip-without-key), 42 production-readiness passed
 
 # Run production-readiness gate
 pytest tests/test_production_readiness.py -v

@@ -6,7 +6,7 @@
 
 This is the **first production-grade release** of the Agent System
 multi-agent orchestration platform. All 22 PRs planned for v0.1.0 are
-delivered, with **834 unit tests + 9 real-LLM E2E tests + 42 production-readiness gate (885 total) passing**
+delivered, with **920 collected tests** (910 unit/collected passed, 7 skipped, 2 xfail for upstream SDK tool bug, 1 known-failure requiring `ANTHROPIC_API_KEY` to run)
 and **zero known production regressions**.
 
 ---
@@ -100,7 +100,7 @@ and **zero known production regressions**.
 | CI/CD gate | ✅ |
 | 4-way resolver (SELF/PEER/HUMAN/ESCALATE) | ✅ |
 | Experience feedback loop | ✅ |
-| **Test coverage** | **834 unit + 9 real-LLM + 42 production-readiness gate = 885 total** |
+| **Test coverage** | **920 collected** (910 passed + 7 skipped + 2 xfail + 1 known-failure) |
 
 ---
 
@@ -147,9 +147,9 @@ pytest tests/test_production_readiness.py -v
 make codegen
 ```
 
-Expected: **834 passed** in unit test run.
+Expected: **910 passed** in unit test run.
 Production-readiness gate: **42 passed**.
-Real-LLM tests: **9 passed** in ~6min (network-bound).
+Real-LLM tests: skipped locally without `ANTHROPIC_API_KEY`.
 
 ---
 

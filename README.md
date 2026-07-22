@@ -267,7 +267,7 @@ ANTHROPIC_API_KEY=sk-xxx pytest tests/test_*real_llm.py -v
 pytest tests/test_production_readiness.py -v
 ```
 
-**Current state**: 362 unit tests + 5 real-LLM E2E tests, 0 known regressions.
+**Current state**: 920 unit/collected tests (910 passed, 7 skipped, 2 xfail for upstream SDK bug, 1 known-failure requiring `ANTHROPIC_API_KEY`), 0 known regressions.
 
 ---
 
