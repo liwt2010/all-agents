@@ -1,5 +1,150 @@
 # Agent System — Release Notes
 
+## v0.3.0 — 2026-07-22 (GitHub App integration — roadmap pull-forward)
+
+**Git tag:** `v0.3.0`
+**Scope:** new feature; backward compatible.
+
+This release delivers the v0.3.0 roadmap item "GitHub App integration"
+early, on top of v0.2.0. Register the server as a GitHub App and
+webhooks trigger `ReviewAgent` automatically when a PR is opened,
+synchronized, or reopened. The review runs in the background so the
+webhook responds within GitHub's 10s timeout.
+
+### Added
+
+- **`POST /api/webhooks/github`** — GitHub App webhook receiver.
+  HMAC-SHA256 signature verification via `X-Hub-Signature-256`
+  (constant-time `hmac.compare_digest`). Raw body is read before
+  JSON parsing so the byte sequence matches what GitHub signed.
+  - Replay protection via `X-GitHub-Delivery` cache (LRU 1000).
+    Duplicate deliveries return `{"status": "duplicate"}`.
+  - Other event types acknowledged with `{"status": "ignored"}`
+    so GitHub doesn't retry.
+  - Background dispatch via `asyncio.create_task` keeps webhook
+    latency under 10s even if the LLM call is slow.
+  - Opt-in comment posting via `GITHUB_PR_COMMENT_TOKEN`; without
+    it, review output is logged locally.
+  - `GITHUB_WEBHOOK_SECRET` required; 503 if unset.
+- **18 tests** in `test_github_webhook.py` covering signature
+  variants, replay dedupe, the full action matrix
+  (opened/synchronize/reopened/closed/edited/assigned),
+  event filtering (push/ping/...), missing-secret behavior, and
+  HMAC roundtrip + tamper detection.
+
+---
+
+## v0.2.0 — 2026-07-22 (production-hardening milestone)
+
+**Git tag:** `v0.2.0`
+**Scope:** backward-compatible additions; no breaking changes.
+
+This release closes the v0.2.0 roadmap: five PRs that move the
+platform from single-replica dev to multi-replica production.
+
+| PR | Title | Impact |
+|---|---|---|
+| RS256 | RS256 JWT + JWKS endpoint | Multi-issuer/multi-tenant auth, external verifiers |
+| Redis | Pluggable rate-limit backend + Redis | Multi-replica safe limits |
+| OTel | FastAPI auto-instrumentation | Per-route spans in collector |
+| RLS | PostgreSQL Row-Level Security | Schema-level tenant isolation |
+| WS | WebSocket streaming LLM | Token-by-token chat UX |
+
+### RS256 JWT (multi-issuer / external verifiers)
+
+`AuthService` now auto-detects algorithm from env:
+- `AUTH_PRIVATE_KEY` set → RS256 (asymmetric, recommended for
+  multi-replica / multi-tenant / external verifiers)
+- unset → HS256 (legacy, backward-compatible)
+
+New env: `AUTH_PRIVATE_KEY` (PEM), `AUTH_PUBLIC_KEYS`
+(kid:public_pem), `AUTH_SIGNING_KID`. Public-key distribution via
+`GET /api/auth/jwks` (RFC 7517). External services fetch once,
+cache, and verify locally without contacting the auth server.
+`scripts/gen_rsa_keys.py` generates 2048/3072/4096-bit RSA keypairs.
+
+### Redis rate-limit backend
+
+Pluggable `RateLimiterBackend` protocol with two implementations:
+- `InMemoryBackend` — async, asyncio.Lock-protected. Default.
+- `RedisBackend` — multi-replica safe. ZSET + Lua for atomic
+  check-and-record. `REDIS_URL` env switches it on; falls back
+  to in-memory if Redis is unreachable at startup.
+
+`LimiterRegistry` is now async-aware; `SlidingWindowRateLimitMiddleware`
+awaits `check_request()`. 21 new tests cover both backends and the
+env-driven factory.
+
+### OpenTelemetry FastAPI auto-instrumentation
+
+When `AGENT_OTEL_ENABLED=true`, the lifespan calls
+`FastAPIInstrumentor.instrument_app(app)` after `init_otel_exporter()`.
+Every request emits a span named after the matched route
+(`POST /api/tasks`, `GET /api/metrics`, etc.) instead of the
+single-span-per-request our custom middleware produced.
+New dep: `opentelemetry-instrumentation-fastapi>=0.40b0`.
+Idempotent; gracefully degrades if the package isn't installed.
+
+### PostgreSQL Row-Level Security
+
+Tenant isolation now enforced at the database schema level, not
+just the API layer:
+- `graph_nodes` / `graph_links` gained `tenant_id` columns with
+  indexes; RLS policies filter via `current_setting('app.current_tenant', true)`.
+- `PostgresBackend.set_tenant_id()` validates 1-128 char strings;
+  `_conn_with_tenant()` emits `set_config(..., true)` per checkout
+  (LOCAL = auto-expire at transaction end → no tenant leak
+  between pool checkouts).
+- Migration (`RLS_MIGRATION_SQL`) is idempotent — `ADD COLUMN
+  IF NOT EXISTS` + `DROP POLICY IF EXISTS` + `CREATE POLICY`
+  pattern, safe to re-run on every `init()`.
+- Fail-closed: connections without `set_tenant_id()` see no rows.
+- Cross-tenant admin: connect as a role with `BYPASSRLS` attribute.
+
+15 new tests cover migration SQL surface, tenant-id validation,
+GUC emission, and the cross-tenant isolation contract.
+
+### WebSocket streaming LLM
+
+`/api/ws/llm/stream?token=&prompt=&system=` upgrades a WebSocket
+and emits text deltas as the LLM produces them:
+- `LLMRouter.stream_chunks()` async generator yields deltas, then
+  a `StreamEnd` sentinel with the aggregated `LLMUsage`.
+- Both Anthropic (`messages.stream`) and OpenAI-compatible
+  (`chat.completions stream=True`) providers supported.
+- 15-second keepalive pings; cancels the LLM generator on client
+  disconnect.
+- Wire format: `{"type":"chunk","data":"..."}`,
+  `{"type":"done","data":{usage...}}`, `{"type":"error",...}`,
+  `{"type":"ping"}`.
+
+### Test coverage
+
+920 collected → **992 collected** (+72):
+- 22 RS256 + JWKS tests
+- 21 Redis backend tests
+- 5 OTel FastAPI instrumentation tests
+- 15 RLS tests
+- 2 router-level stream tests (5 WS endpoint tests skipped on
+  starlette 1.3.x + httpx 0.28 transport incompatibility)
+
+### Known limitations (unchanged from v0.1.x)
+
+- HS256 path still supported; RS256 is the recommended default for
+  new deployments.
+- Rate limit at scale requires Redis (single-replica deploys are
+  fine with the in-memory backend).
+- PostgreSQL RLS only takes effect with the PostgresBackend —
+  SQLite deployments still rely on API-layer tenant filtering.
+
+### Upgrade
+
+Drop-in replacement for v0.1.1. No config or migration steps
+required. New env vars are all optional; existing HS256 deployments
+continue to work without any change.
+
+---
+
 ## v0.1.1 — 2026-07-22 (post-v0.1.0 audit + typing sweep)
 
 **Git tag:** `v0.1.1`
