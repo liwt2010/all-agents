@@ -38,7 +38,7 @@ That's it. SQLite is the default backend (`AGENT_STORAGE=json` for files, `AGENT
 - All 9 agents (Tech / Product / Test / Code / Deploy / PEER / Review / Dataview / Smart core)
 - 885 tests pass locally + via CI
 - Prometheus metrics at `/metrics`
-- OTel tracing (CONSOLE exporter by default; set `OTEL_MODE=otlp_http` + `OTEL_EXPORTER_OTLP_ENDPOINT` for real backend)
+- OTel tracing (CONSOLE exporter by default; set `OTEL_MODE=otlp_http` + `OTEL_EXPORTER_OTLP_ENDPOINT` for real backend). With `AGENT_OTEL_ENABLED=true`, FastAPI auto-instrumentation is enabled at startup, emitting one span per matched route (`POST /api/tasks`, `GET /api/metrics`, etc.) — useful for per-endpoint latency dashboards in your collector (Jaeger/Tempo/SigNoz).
 - Backup subsystem writes to `/data/backup`
 - Audit log to `/data/audit`
 - Rate limiting (in-memory; swap to Redis later if you scale out)

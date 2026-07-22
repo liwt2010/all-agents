@@ -78,6 +78,22 @@ async def lifespan(app: FastAPI):
         logger.info("Graph loaded from disk")
     except Exception as e:
         logger.warning(f"Could not load graph from disk: {e}")
+
+    # OpenTelemetry: init exporter, then enable per-route FastAPI
+    # auto-instrumentation if both are turned on. Per-route spans
+    # give us much richer trace data than our custom middleware's
+    # single-span-per-request approach (see OTelExporter docs).
+    try:
+        from agent_system.observability.otel_exporter import (
+            init_otel_exporter,
+            instrument_fastapi,
+            shutdown_otel_exporter,
+        )
+        if init_otel_exporter():
+            instrument_fastapi(app)
+    except Exception as e:
+        logger.warning(f"OTel setup error (continuing without tracing): {e}")
+
     yield
     # Graceful shutdown: wait for in-flight tasks
     in_flight = get_in_flight_tasks()
@@ -94,6 +110,13 @@ async def lifespan(app: FastAPI):
         logger.info("Graph saved to disk")
     except Exception as e:
         logger.warning(f"Could not save graph: {e}")
+
+    # Flush + shutdown OTel exporter (no-op if not enabled).
+    try:
+        from agent_system.observability.otel_exporter import shutdown_otel_exporter
+        shutdown_otel_exporter()
+    except Exception as e:
+        logger.debug(f"OTel shutdown skipped: {e}")
 
 
 # ---------------------------------------------------------------------------

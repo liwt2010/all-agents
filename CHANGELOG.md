@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     backends, shared-state across instances (simulating replicas),
     key namespacing, reset, fail-open on Redis errors, and the
     env-driven factory.
+- **OpenTelemetry FastAPI auto-instrumentation (PR v0.2.0)**: when
+  `AGENT_OTEL_ENABLED=true`, the lifespan automatically calls
+  `FastAPIInstrumentor.instrument_app(app)` after `init_otel_exporter()`
+  so every request emits a span named after the matched route
+  (e.g. `GET /api/health`) instead of the single-span-per-request
+  our custom middleware produced. New dep:
+  `opentelemetry-instrumentation-fastapi>=0.40b0`. Tests: 5 new in
+  `test_otel_fastapi.py` cover the import-failure path, idempotency,
+  end-to-end span emission, and the lifespan wiring.
 - **RS256 JWT support** (PR-RS256, v0.2.0): `AuthService` now auto-detects
   RS256 vs HS256 based on whether `AUTH_PRIVATE_KEY` env is set. Backward
   compatible — existing HS256 deployments need no changes.

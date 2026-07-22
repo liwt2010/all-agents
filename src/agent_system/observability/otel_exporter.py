@@ -137,6 +137,44 @@ def shutdown_otel_exporter(timeout_seconds: float = 5.0) -> bool:
     return True
 
 
+def instrument_fastapi(app: Any) -> bool:
+    """
+    Enable FastAPI auto-instrumentation for per-route span granularity.
+
+    Requires `opentelemetry-instrumentation-fastapi` to be installed.
+    When enabled, every request creates a span named after the matched
+    route (e.g. `POST /api/tasks`) — much richer than our custom
+    middleware's single-span-per-request approach.
+
+    Idempotent: returns False (and logs) if the package isn't installed
+    or the app was already instrumented.
+
+    Use:
+        init_otel_exporter()           # first
+        instrument_fastapi(app)        # then — needs an active TracerProvider
+    """
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    except ImportError:
+        logger.info(
+            "FastAPI auto-instrumentation unavailable — "
+            "install opentelemetry-instrumentation-fastapi to enable."
+        )
+        return False
+
+    if getattr(app, "_is_instrumented_by_opentelemetry", False):
+        logger.debug("FastAPI app already instrumented; skipping")
+        return True
+
+    try:
+        FastAPIInstrumentor.instrument_app(app)
+        logger.info("FastAPI auto-instrumentation enabled (per-route spans)")
+        return True
+    except Exception as e:
+        logger.warning(f"FastAPI auto-instrumentation failed: {e}")
+        return False
+
+
 # ── Internal: OTel SDK init ──────────────────────────────────────────
 
 
