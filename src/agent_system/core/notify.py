@@ -94,7 +94,16 @@ class Notifier:
         for handler in self._handlers.get(channel, []):
             try:
                 if asyncio.iscoroutinefunction(handler):
-                    asyncio.ensure_future(handler(n))
+                    task = asyncio.ensure_future(handler(n))
+                    # Surface async handler failures (was previously
+                    # silently dropped — see RuntimeWarning at notify.py:101).
+                    task.add_done_callback(
+                        lambda t: logger.warning(
+                            f"Async notification handler failed: {t.exception()}"
+                        )
+                        if t.done() and t.exception() is not None
+                        else None
+                    )
                 else:
                     handler(n)
             except Exception as e:
