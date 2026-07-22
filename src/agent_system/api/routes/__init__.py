@@ -17,6 +17,7 @@ Layout:
 from agent_system.api.routes.agents import router as agents_router
 from agent_system.api.routes.audit import router as audit_router
 from agent_system.api.routes.auth import router as auth_router
+from agent_system.api.routes.custom_agents import router as custom_agents_router
 from agent_system.api.routes.github_webhook import router as github_webhook_router
 from agent_system.api.routes.graph import router as graph_router
 from agent_system.api.routes.health import router as health_router
@@ -28,6 +29,7 @@ __all__ = [
     "agents_router",
     "audit_router",
     "auth_router",
+    "custom_agents_router",
     "github_webhook_router",
     "graph_router",
     "health_router",

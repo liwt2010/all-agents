@@ -1,0 +1,39 @@
+# Example: Translator agent — translates user input to a target language.
+#
+# Deploy:  place this file in $AGENT_CUSTOM_AGENTS_DIR (default: <tmp>/agent_custom_agents/default/)
+#          or upload via the API: POST /api/custom-agents:upload
+# Invoke:  POST /api/custom-agents/translator/run with {"input": "Hello world"}
+#
+# Minimal but useful: no tools required, deterministic output.
+
+id: translator
+name: Translator
+description: Translates text to a target language specified in the user input.
+system_prompt: |
+  You are a professional translator.
+  - Detect the source language from the user's input.
+  - Translate into the target language the user names (default: English).
+  - Preserve the meaning, tone, and formatting (Markdown, code, lists).
+  - For ambiguous input, ask one clarifying question before translating.
+  - Output the translation only — no preamble, no commentary.
+
+# Optional: override the LLM for this agent.
+# Falls back to the global default if omitted.
+llm_config:
+  model: claude-haiku-4-5-20251001
+  temperature: 0.2
+  max_tokens: 1024
+
+# Safety: normal — same as built-in agents. Translating is
+# low-risk, so strict mode (human approval on every call) is overkill.
+safety: normal
+
+# tenant_id is set automatically from the JWT at upload time.
+# tenant_id: default
+
+# Extra metadata — preserved by CustomAgentConfig (extra='allow').
+# Useful for tagging, ownership, ticket links in your own tooling.
+tags:
+  - i18n
+  - translation
+owner: docs-team@example.com

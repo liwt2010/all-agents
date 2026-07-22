@@ -33,6 +33,7 @@ from agent_system.api.routes import (
     agents_router,
     audit_router,
     auth_router,
+    custom_agents_router,
     github_webhook_router,
     graph_router,
     health_router,
@@ -253,3 +254,4 @@ app.include_router(metrics_router)
 app.include_router(audit_router)
 app.include_router(llm_stream_router)
 app.include_router(github_webhook_router)
+app.include_router(custom_agents_router)

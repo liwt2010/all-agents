@@ -23,6 +23,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     backends, shared-state across instances (simulating replicas),
     key namespacing, reset, fail-open on Redis errors, and the
     env-driven factory.
+- **Custom Agent marketplace (PR v0.3.0)**: tenants can now define
+  their own agents via YAML — no code change required.
+  - `CustomAgent` base class already existed (PR-8); v0.3.0 adds:
+    - **YAML loader** (`agent_system.agents.custom.loader`):
+      `load_from_yaml_file(path)` parses + validates one file;
+      `load_from_directory(dir, auto_register=True)` loads all
+      `*.yaml` / `*.yml` files in alphabetical order, skipping
+      invalid ones with a clear log line. Deterministic load order
+      means two files declaring the same id — last-write-wins,
+      matching `ls` ordering.
+    - **HTTP API** (`/api/custom-agents`):
+      - `GET    /api/custom-agents` — list (tenant-scoped)
+      - `GET    /api/custom-agents/{id}` — detail (system_prompt
+        visible only to the owner)
+      - `POST   /api/custom-agents/{id}/run` — invoke via LLM
+        router (mock or real, depending on `ANTHROPIC_API_KEY`)
+      - `POST   /api/custom-agents:upload` — admin-only YAML upload
+      - `DELETE /api/custom-agents/{id}` — admin-only remove
+    - **Multi-tenant isolation**: all endpoints scope by JWT
+      `tenant_id` claim. Cross-tenant access returns 404, not 403
+      (no information leak about other tenants' agent IDs).
+    - **Two examples** in `examples/custom-agents/`:
+      `translator.yaml` (text-only) and `pr-summarizer.yaml`
+      (uses `read_file` + `code_search`).
+  - Tests: 19 new in `test_custom_agent_loader.py` cover YAML
+    parse + validation errors, directory loading with bad files
+    present, HTTP API (list/get/run/upload/delete), 403 for
+    non-admin uploads, tenant isolation.
 - **GitHub App webhook integration (PR v0.3.0)**: when registered as
   a GitHub App, the server receives `pull_request` webhooks and
   automatically triggers `ReviewAgent` on `opened` / `synchronize` /

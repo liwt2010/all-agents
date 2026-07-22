@@ -1,0 +1,41 @@
+# Example: PR Summary agent — summarises a pull request into a
+# one-paragraph blurb for changelog/release-notes generation.
+#
+# This agent uses read_file + code_search so it can inspect the diff.
+#
+# Deploy:  place this file in $AGENT_CUSTOM_AGENTS_DIR
+# Invoke:  POST /api/custom-agents/pr-summarizer/run
+#          with {"input": "Pull request #123: adds OAuth flow"}
+
+id: pr-summarizer
+name: PR Summarizer
+description: Reads a pull request and produces a one-paragraph summary suitable for changelogs and release notes.
+system_prompt: |
+  You are a release-notes assistant.
+  When given a PR number or description:
+    1. Read the diff with read_file.
+    2. Search for related tests with code_search.
+    3. Produce a single paragraph (3-5 sentences) that covers:
+       - What changed (the user-visible feature/fix)
+       - Why it changed (the motivation)
+       - Any breaking changes or migration notes
+  Output ONLY the paragraph — no Markdown headings, no bullet lists.
+  If the diff is empty or the change is too small to summarise,
+  return a one-line summary like "Internal refactor; no user-facing change."
+
+tools:
+  - read_file
+  - code_search
+
+llm_config:
+  model: claude-sonnet-4-20250514
+  temperature: 0.3
+  max_tokens: 512
+
+# Safety: autonomous — summarising is read-only.
+safety: autonomous
+
+tags:
+  - release
+  - docs
+  - automation
