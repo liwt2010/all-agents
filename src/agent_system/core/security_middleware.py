@@ -434,7 +434,7 @@ class SlidingWindowRateLimitMiddleware(BaseHTTPMiddleware):
 
         try:
             registry = get_limiter_registry()
-            allowed, decision, dimension = registry.check_request(user_id, ip, scope)
+            allowed, decision, dimension = await registry.check_request(user_id, ip, scope)
         except Exception as e:
             _rl_logger.warning(f"Rate limiter error (fail-{self.fail_mode}): {e}")
             if self.fail_mode == "closed":

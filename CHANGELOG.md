@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Distributed rate limiter backend (PR v0.2.0)**: pluggable
+  `RateLimiterBackend` protocol with two implementations:
+  - `InMemoryBackend` — async, asyncio.Lock-protected. Default for
+    single-replica deploys and tests.
+  - `RedisBackend` — multi-replica safe. Uses ZSET + Lua (production)
+    or WATCH/MULTI/EXEC (servers without Lua support like fakeredis)
+    to make check-and-record atomic. `REDIS_URL` env switches on
+    the Redis backend at server startup; if Redis is unreachable,
+    the registry falls back to in-memory so the server still boots.
+  - `LimiterRegistry` is now async-aware; `SlidingWindowRateLimitMiddleware`
+    awaits `check_request()`.
+  - Tests: 21 new tests in `test_rate_limit_redis.py` cover both
+    backends, shared-state across instances (simulating replicas),
+    key namespacing, reset, fail-open on Redis errors, and the
+    env-driven factory.
 - **RS256 JWT support** (PR-RS256, v0.2.0): `AuthService` now auto-detects
   RS256 vs HS256 based on whether `AUTH_PRIVATE_KEY` env is set. Backward
   compatible — existing HS256 deployments need no changes.

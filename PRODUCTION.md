@@ -81,13 +81,23 @@ docker run -d -p 8000:8000 --name agent \
 
 ## 3. When to add Redis
 
-Redis is needed for **multi-replica** deployments only. The in-memory sliding-window rate limiter works fine for single-instance.
+Redis is needed for **multi-replica** deployments only. The in-memory
+sliding-window rate limiter works fine for single-instance.
 
 | Setup | Need Redis? |
 |---|---|
 | 1 instance, <1000 RPS | No |
-| 2-10 instances behind a load balancer | Yes (rate-limit + audit log fan-out) |
-| 10+ instances / multi-region | Yes + Kafka/Redis Streams |
+| 2-10 instances behind a load balancer | **Yes** (rate-limit + audit log fan-out) |
+| 10+ instances / multi-region | **Yes** + Kafka/Redis Streams |
+
+Set `REDIS_URL=redis://host:6379/0` in `.env`. The server probes
+connectivity at startup; if Redis is unreachable the rate limiter
+silently falls back to per-process in-memory mode so the API still
+serves traffic (limiter just becomes per-replica instead of global).
+The Redis backend uses ZSET + Lua for atomic sliding-window-log
+semantics, so two replicas can't both admit a request that pushes
+the count over the limit. A WATCH/MULTI/EXEC fallback exists for
+servers that don't support Lua (fakeredis, mocks).
 
 ---
 

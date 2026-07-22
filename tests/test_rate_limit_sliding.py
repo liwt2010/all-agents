@@ -159,6 +159,11 @@ class TestScopeClassification:
 # ── LimiterRegistry (composed check) ──
 
 class TestLimiterRegistry:
+    def _check(self, reg, user, ip, scope):
+        """Sync wrapper around the now-async check_request."""
+        import asyncio
+        return asyncio.run(reg.check_request(user, ip, scope))
+
     def test_user_and_ip_both_must_pass(self):
         from agent_system.core.rate_limit import LimiterRegistry, ScopeConfig
         scopes = {
@@ -166,9 +171,9 @@ class TestLimiterRegistry:
         }
         reg = LimiterRegistry(scopes=scopes)
         # 2 IP requests succeed (within IP limit), then IP blocks
-        allowed1, _, dim1 = reg.check_request("user-A", "1.1.1.1", "default")
-        allowed2, _, dim2 = reg.check_request("user-B", "1.1.1.1", "default")
-        allowed3, decision3, dim3 = reg.check_request("user-C", "1.1.1.1", "default")
+        allowed1, _, dim1 = self._check(reg, "user-A", "1.1.1.1", "default")
+        allowed2, _, dim2 = self._check(reg, "user-B", "1.1.1.1", "default")
+        allowed3, decision3, dim3 = self._check(reg, "user-C", "1.1.1.1", "default")
         assert allowed1 and allowed2
         assert not allowed3
         assert dim3 == "ip"
@@ -178,23 +183,23 @@ class TestLimiterRegistry:
         scopes = {"default": ScopeConfig(user_limit=2, ip_limit=100)}
         reg = LimiterRegistry(scopes=scopes)
         # User A exhausts their quota
-        assert reg.check_request("A", "1.1.1.1", "default")[0]
-        assert reg.check_request("A", "1.1.1.1", "default")[0]
-        a_blocked, _, _ = reg.check_request("A", "1.1.1.1", "default")
+        assert self._check(reg, "A", "1.1.1.1", "default")[0]
+        assert self._check(reg, "A", "1.1.1.1", "default")[0]
+        a_blocked, _, _ = self._check(reg, "A", "1.1.1.1", "default")
         assert a_blocked is False
         # User B is independent
-        assert reg.check_request("B", "1.1.1.1", "default")[0]
-        assert reg.check_request("B", "1.1.1.1", "default")[0]
+        assert self._check(reg, "B", "1.1.1.1", "default")[0]
+        assert self._check(reg, "B", "1.1.1.1", "default")[0]
 
     def test_anonymous_falls_back_to_ip_only(self):
         from agent_system.core.rate_limit import LimiterRegistry, ScopeConfig
         scopes = {"default": ScopeConfig(user_limit=2, ip_limit=3)}
         reg = LimiterRegistry(scopes=scopes)
         # No user_id — only IP limiter applies
-        assert reg.check_request(None, "1.1.1.1", "default")[0]
-        assert reg.check_request(None, "1.1.1.1", "default")[0]
-        assert reg.check_request(None, "1.1.1.1", "default")[0]
-        allowed, _, dim = reg.check_request(None, "1.1.1.1", "default")
+        assert self._check(reg, None, "1.1.1.1", "default")[0]
+        assert self._check(reg, None, "1.1.1.1", "default")[0]
+        assert self._check(reg, None, "1.1.1.1", "default")[0]
+        allowed, _, dim = self._check(reg, None, "1.1.1.1", "default")
         assert allowed is False
         assert dim == "ip"
 

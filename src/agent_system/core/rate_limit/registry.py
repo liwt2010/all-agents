@@ -1,20 +1,24 @@
 """
-Rate limit registry — composes multiple SlidingWindowLimiters keyed by scope.
+Rate limit registry — composes per-(scope, dimension) limiters on top
+of a pluggable backend.
 
 Provides:
 - Per-scope limits (default / expensive / heavy / auth)
 - Composed user + IP + global checks
 - env var configuration
+- Pluggable backend (in-memory or Redis) for single-replica or
+  multi-replica deployments
 """
 
 import logging
 import os
 from dataclasses import dataclass
-from typing import Dict, Optional
 
-from agent_system.core.rate_limit.sliding_window import (
-    LimitDecision,
-    SlidingWindowLimiter,
+from agent_system.core.rate_limit.sliding_window import LimitDecision
+from agent_system.core.rate_limit.backend import (
+    InMemoryBackend,
+    RateLimiterBackend,
+    create_backend_from_env,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,39 +100,28 @@ def classify_scope(path: str) -> str:
 
 class LimiterRegistry:
     """
-    Holds one SlidingWindowLimiter per (scope, dimension) pair.
+    Holds one logical limiter per (scope, dimension) pair.
 
     Dimensions:
       - user:{user_id}:{scope}
       - ip:{ip}:{scope}
+
+    All check/peek calls go through the shared `backend`. The registry
+    just owns the scope→limit mapping and the dimension key format.
     """
 
-    def __init__(self, scopes: dict[str, ScopeConfig] | None = None):
+    def __init__(
+        self,
+        scopes: dict[str, ScopeConfig] | None = None,
+        backend: RateLimiterBackend | None = None,
+    ):
         self.scopes = scopes or load_scope_config_from_env()
-        self._user_limiters: dict[str, SlidingWindowLimiter] = {}
-        self._ip_limiters: dict[str, SlidingWindowLimiter] = {}
+        self.backend: RateLimiterBackend = backend or InMemoryBackend()
 
-    def _get_user_limiter(self, scope: str) -> SlidingWindowLimiter:
-        if scope not in self._user_limiters:
-            cfg = self.scopes.get(scope, self.scopes["default"])
-            self._user_limiters[scope] = SlidingWindowLimiter(
-                limit=cfg.user_limit,
-                window_seconds=cfg.user_window_seconds,
-                scope=scope,
-            )
-        return self._user_limiters[scope]
+    def _user_cfg(self, scope: str) -> ScopeConfig:
+        return self.scopes.get(scope, self.scopes["default"])
 
-    def _get_ip_limiter(self, scope: str) -> SlidingWindowLimiter:
-        if scope not in self._ip_limiters:
-            cfg = self.scopes.get(scope, self.scopes["default"])
-            self._ip_limiters[scope] = SlidingWindowLimiter(
-                limit=cfg.ip_limit,
-                window_seconds=cfg.ip_window_seconds,
-                scope=scope,
-            )
-        return self._ip_limiters[scope]
-
-    def check_request(
+    async def check_request(
         self, user_id: str | None, ip: str, scope: str
     ) -> tuple[bool, LimitDecision, str]:
         """
@@ -138,38 +131,65 @@ class LimiterRegistry:
         If user_id is None, only IP limiter applies.
         """
         if user_id:
-            user_limiter = self._get_user_limiter(scope)
-            user_decision = user_limiter.check(f"user:{user_id}")
+            cfg = self._user_cfg(scope)
+            user_decision = await self.backend.check(
+                f"user:{user_id}",
+                limit=cfg.user_limit,
+                window_seconds=cfg.user_window_seconds,
+                scope=scope,
+            )
             if not user_decision.allowed:
                 return False, user_decision, "user"
 
-        ip_limiter = self._get_ip_limiter(scope)
-        ip_decision = ip_limiter.check(f"ip:{ip}")
+        cfg = self._user_cfg(scope)
+        ip_decision = await self.backend.check(
+            f"ip:{ip}",
+            limit=cfg.ip_limit,
+            window_seconds=cfg.ip_window_seconds,
+            scope=scope,
+        )
         if not ip_decision.allowed:
             return False, ip_decision, "ip"
 
         # All passed — return the most restrictive remaining count
         if user_id:
-            user_limiter = self._get_user_limiter(scope)
-            user_decision = user_limiter.peek(f"user:{user_id}")
+            user_decision = await self.backend.peek(
+                f"user:{user_id}",
+                limit=cfg.user_limit,
+                window_seconds=cfg.user_window_seconds,
+                scope=scope,
+            )
             return True, ip_decision, "all" if user_decision.remaining > ip_decision.remaining else "user"
         return True, ip_decision, "ip"
 
-    def reset_all(self) -> None:
-        for lim in self._user_limiters.values():
-            lim.reset()
-        for lim in self._ip_limiters.values():
-            lim.reset()
+    async def reset_all(self) -> None:
+        await self.backend.reset(None)
 
 
-# Global singleton
+# Global singleton (lazy + env-driven)
 _registry: LimiterRegistry | None = None
 
 
 def get_limiter_registry() -> LimiterRegistry:
     global _registry
     if _registry is None:
-        _registry = LimiterRegistry()
+        # Lazy backend init: avoid connecting to Redis at import time so
+        # tests and dev runs without REDIS_URL still work.
+        backend = InMemoryBackend()
+        _registry = LimiterRegistry(backend=backend)
+    return _registry
+
+
+async def init_limiter_registry() -> LimiterRegistry:
+    """Async init: probe REDIS_URL and pick the right backend.
+
+    Call once at server startup. After this, `get_limiter_registry()`
+    returns the same registry with the chosen backend.
+    """
+    global _registry
+    if _registry is None:
+        backend = await create_backend_from_env()
+        _registry = LimiterRegistry(backend=backend)
     return _registry
 
 
