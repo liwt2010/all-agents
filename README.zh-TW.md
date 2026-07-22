@@ -258,15 +258,30 @@ pytest tests/test_production_readiness.py -v
 
 ---
 
-## 路線圖 (v0.2.0+)
+## 路線圖
 
-- [ ] **RS256 JWT**(多簽發方 / 大規模多租戶)
-- [ ] **Redis 後端限流**(多副本)
-- [ ] **PostgreSQL 列級安全**(Schema 層按租戶隔離)
-- [ ] **OpenTelemetry FastAPI 自動埋點**(按路由粒度)
-- [ ] **透過 WebSocket 串流 LLM 回應**
-- [ ] **GitHub App 整合**(自動 PR 審查)
-- [ ] **自訂 Agent 市場**(可分享範本)
+### v0.3.0 — 已交付 ✅
+
+- ✅ **自訂 Agent 市場** — YAML 驅動的租戶級智能體，HTTP API 支援 list / get / run / upload / delete
+- ✅ **GitHub App 整合** — Webhook 接收器 + 自動 PR 審查 dispatch via ReviewAgent
+
+### v0.2.0 — 已交付 ✅
+
+- ✅ **RS256 JWT**(多簽發方 / 大規模多租戶)
+- ✅ **Redis 後端限流**(多副本)
+- ✅ **PostgreSQL 列級安全**(Schema 層按租戶隔離)
+- ✅ **OpenTelemetry FastAPI 自動埋點**(按路由粒度)
+- ✅ **透過 WebSocket 串流 LLM 回應**
+- ✅ **GitHub App 整合**(自動 PR 審查)
+- ✅ **自訂 Agent 市場**(可分享範本)
+
+### 前瞻規劃 (post-v0.3.0)
+
+- **函式呼叫 / 工具呼叫的串流**（目前僅文字）
+- **多租戶 Custom Agent 市場 UI** — 用於瀏覽/上傳自訂 Agent 的 Web 前端
+- **HL7 / FHIR 配接器** — 醫療資料格式整合
+- **原生 gRPC 伺服器** 與 REST/WS API 並列
+- **分散式任務佇列** — 目前為單行程執行;加入 Celery/RQ 支援高吞吐
 
 ---
 
