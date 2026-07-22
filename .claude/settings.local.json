@@ -103,7 +103,8 @@
       "Bash(\".venv/Scripts/pip\" install *)",
       "Bash(.venv/Scripts/python -c ' *)",
       "Bash(\".venv/Scripts/python\")",
-      "Bash(\".venv/Scripts/python\" -m pytest tests/test_resolver_peer_integration.py -v)"
+      "Bash(\".venv/Scripts/python\" -m pytest tests/test_resolver_peer_integration.py -v)",
+      "Bash(python -m pytest tests/ -q --ignore=tests/test_*real_llm.py -x --no-header)"
     ]
   }
 }
