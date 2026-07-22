@@ -160,10 +160,76 @@ See `.github/workflows/ci.yml` for the full pipeline.
 
 ---
 
-## 8. Where to get help
+## 8. JWT signing: HS256 vs RS256
+
+The default is **HS256** (symmetric secret) — fine for a single
+issuer/replica. For multi-replica, multi-tenant, or external verifiers
+(notebooks, microservices, partner integrations), switch to **RS256**
+(asymmetric keypair) so the signing key never leaves the server.
+
+### One-time setup
+
+```bash
+# Generates private.pem + public.pem, prints JWKS preview
+python scripts/gen_rsa_keys.py --kid v1 --output-dir ./keys
+
+# Optional: appends AUTH_PRIVATE_KEY=... and AUTH_PUBLIC_KEYS=...
+# directly to your .env (re-runs replace, not accumulate)
+python scripts/gen_rsa_keys.py --kid v1 --env-file .env.local
+```
+
+### Configure
+
+```bash
+# In .env (single-line, real newlines escaped as \n)
+AUTH_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----"
+AUTH_PUBLIC_KEYS="v1:-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
+AUTH_SIGNING_KID=v1
+```
+
+**Deployment notes**:
+- `AUTH_PRIVATE_KEY` must only live on instances that *sign* tokens.
+  Verifier-only replicas (read-only services) can omit it; the derived
+  public key is auto-included in `AUTH_PUBLIC_KEYS` so they can still
+  verify locally without needing the private key.
+- `AUTH_PRIVATE_KEY` should be mounted from a secret manager (Vault,
+  AWS Secrets Manager, k8s Secret), not committed.
+
+### Public-key distribution
+
+`GET /api/auth/jwks` (unauthenticated, public) returns:
+
+```json
+{
+  "keys": [
+    {"kty": "RSA", "kid": "v1", "use": "sig", "alg": "RS256",
+     "n": "0vx7...", "e": "AQAB"}
+  ]
+}
+```
+
+External services fetch this once, cache, and verify tokens locally
+without contacting the auth server. Standard `jwt`/`jose` libraries
+parse this format directly.
+
+### Key rotation
+
+1. Generate a new keypair (`python scripts/gen_rsa_keys.py --kid v2 --output-dir ./keys-v2`).
+2. Update env: `AUTH_PRIVATE_KEY=<new>`, `AUTH_PUBLIC_KEYS="v2:<new-pub>,v1:<old-pub>"`,
+   `AUTH_SIGNING_KID=v2`.
+3. New tokens sign with v2; old v1 tokens still verify via the retained
+   `v1:<old-pub>` entry.
+4. After all v1 tokens expire, drop the `v1` entry from `AUTH_PUBLIC_KEYS`.
+
+No-downtime rollover — replicas can be restarted one at a time during
+the rotation.
+
+---
+
+## 9. Where to get help
 
 - `README.md` — project overview, three-language versions in `README.zh-CN.md` / `README.zh-TW.md`
-- `RELEASE_NOTES.md` — full changelog for v0.1.0 (22 PRs)
+- `RELEASE_NOTES.md` — full changelog (v0.1.0 + v0.1.1)
 - `STATUS.md` — what works, what doesn't, what the live numbers are
 - `DEFERRED.md` — known limitations + handoff notes
 - `ARCHITECTURE.md` — internal design (for contributors)

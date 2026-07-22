@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **RS256 JWT support** (PR-RS256, v0.2.0): `AuthService` now auto-detects
+  RS256 vs HS256 based on whether `AUTH_PRIVATE_KEY` env is set. Backward
+  compatible — existing HS256 deployments need no changes.
+  - `AUTH_PRIVATE_KEY` (PEM, PKCS#8) — signs new tokens.
+  - `AUTH_PUBLIC_KEYS` (comma-separated `kid:public_pem`) — verify keys,
+    including those from a previously-retired signing key.
+  - `AUTH_SIGNING_KID` (optional) — defaults to `"current"`; override to
+    match the kid of a registered public key.
+  - `GET /api/auth/jwks` exposes the public verify keys as a
+    JWKS (RFC 7517) document for external verifiers.
+  - `scripts/gen_rsa_keys.py` generates 2048/3072/4096-bit RSA keypairs
+    with optional `--env-file` to write `AUTH_PRIVATE_KEY` /
+    `AUTH_PUBLIC_KEYS` lines directly.
+  - Tests: 17 new tests in `test_auth_rs256.py` cover algorithm
+    auto-selection, sign/verify round-trip, external PyJWT verification,
+    JWKS content, key rotation across restarts, and the HS256 back-compat
+    path.
+
 ### Changed
 - **UP006/UP045 typing modernization (full sweep)**: all 84 `src/` files
   migrated from uppercase `typing.Dict/List/Optional/Tuple/Union` to
