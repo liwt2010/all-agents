@@ -15,7 +15,7 @@ router = APIRouter(tags=["agents"])
 class AgentInfo(BaseModel):
     name: str
     description: str
-    capabilities: List[str]
+    capabilities: list[str]
 
 
 def _agent_registry() -> dict:
@@ -34,12 +34,12 @@ def _agent_registry() -> dict:
     }
 
 
-@router.get("/api/agents", response_model=List[AgentInfo])
+@router.get("/api/agents", response_model=list[AgentInfo])
 async def list_agents(
     user: User = Depends(require_auth(get_auth_service_singleton())),
-) -> List[AgentInfo]:
+) -> list[AgentInfo]:
     """List available agents with capabilities."""
-    agents: List[AgentInfo] = []
+    agents: list[AgentInfo] = []
     for name, cls in _agent_registry().items():
         instance = cls()
         agents.append(AgentInfo(

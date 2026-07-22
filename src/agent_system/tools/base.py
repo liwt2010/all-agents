@@ -57,7 +57,7 @@ class Tool(ABC):
         input_schema: dict
 
     Subclasses must implement:
-        async def execute(self, inputs: Dict[str, Any]) -> ToolResult
+        async def execute(self, inputs: dict[str, Any]) -> ToolResult
 
     Use @register decorator for auto-registration.
     """

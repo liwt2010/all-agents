@@ -30,7 +30,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -225,7 +225,7 @@ class AggExpr:
     agg: str            # COUNT/AVG/SUM/MIN/MAX
     field: FieldRef     # field or * for COUNT(*)
     alias: str | None = None
-    filter: Optional["Condition"] = None  # FILTER (WHERE ...)
+    filter: "Condition | None" = None  # FILTER (WHERE ...)
     line: int = 0
     column: int = 0
 
@@ -267,7 +267,7 @@ class StepsClause:
     column: int = 0
 
 
-Condition = Union[Comparison, InClause, StepsClause]
+Condition = Comparison | InClause | StepsClause
 
 
 @dataclass
@@ -294,7 +294,7 @@ class LimitClause:
 
 @dataclass
 class SelectStmt:
-    select_exprs: list[Union[FieldExpr, AggExpr]]
+    select_exprs: list[FieldExpr | AggExpr]
     from_clause: FromClause
     where: Condition | None = None
     order: OrderClause | None = None
@@ -368,14 +368,14 @@ class Parser:
             is_aggregation_only=is_agg,
         )
 
-    def _parse_select_exprs(self) -> list[Union[FieldExpr, AggExpr]]:
+    def _parse_select_exprs(self) -> list[FieldExpr | AggExpr]:
         exprs = [self._parse_select_expr()]
         while self.peek().type == TokenType.COMMA:
             self.advance()
             exprs.append(self._parse_select_expr())
         return exprs
 
-    def _parse_select_expr(self) -> Union[FieldExpr, AggExpr]:
+    def _parse_select_expr(self) -> FieldExpr | AggExpr:
         tok = self.peek()
         if tok.type in (TokenType.COUNT, TokenType.AVG, TokenType.SUM, TokenType.MIN, TokenType.MAX):
             return self._parse_agg_expr()

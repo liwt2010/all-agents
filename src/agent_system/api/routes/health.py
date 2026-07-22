@@ -46,7 +46,7 @@ async def health() -> HealthResponse:
 
 
 @router.get("/api/ready")
-async def ready() -> Dict[str, Any]:
+async def ready() -> dict[str, Any]:
     """Readiness probe - checks core dependencies.
 
     Returns 200 with status="ok" if all checks pass, 503 with
@@ -54,7 +54,7 @@ async def ready() -> Dict[str, Any]:
 
     In production, requires a real LLM API key.
     """
-    checks: Dict[str, str] = {}
+    checks: dict[str, str] = {}
 
     # Storage check
     try:

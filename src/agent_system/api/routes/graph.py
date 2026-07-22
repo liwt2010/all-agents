@@ -14,7 +14,7 @@ router = APIRouter(tags=["graph"])
 @router.get("/api/graph/stats")
 async def graph_stats(
     user: User = Depends(require_auth(get_auth_service_singleton())),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get graph statistics (tenant-isolated)."""
     from agent_system.memory.graph import get_graph
     graph = get_graph()
@@ -25,7 +25,7 @@ async def graph_stats(
 async def get_graph_node(
     node_id: str,
     user: User = Depends(require_auth(get_auth_service_singleton())),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get a graph node with neighbors (tenant-isolated)."""
     from agent_system.memory.graph import get_graph
     graph = get_graph()

@@ -15,7 +15,7 @@ router = APIRouter(tags=["metrics"])
 @router.get("/api/metrics")
 async def get_metrics(
     user: User = Depends(require_auth(get_auth_service_singleton())),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get Prometheus-compatible metrics as JSON."""
     from agent_system.core.observability import MetricsCalculator
     calc = MetricsCalculator()
@@ -31,7 +31,7 @@ async def get_metrics(
 @router.get("/api/metrics/prometheus")
 async def get_prometheus_metrics(
     user: User = Depends(require_auth(get_auth_service_singleton())),
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Get metrics in Prometheus text format (JSON wrapped)."""
     from agent_system.observability.metrics import get_metrics_registry
     text = get_metrics_registry().render()

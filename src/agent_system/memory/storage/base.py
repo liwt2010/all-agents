@@ -11,7 +11,7 @@ Migration:   JSON (import/export format only)
 See docs/STORAGE.md for full design.
 """
 
-from typing import TYPE_CHECKING, List, Optional, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from agent_system.memory.graph import (
@@ -30,13 +30,13 @@ class GraphStorage(Protocol):
     def save_node(self, node: "GraphNode") -> None:
         """Save or update a single node."""
 
-    def load_node(self, node_id: str) -> Optional["GraphNode"]:
+    def load_node(self, node_id: str) -> "GraphNode | None":
         """Load a single node by id. Returns None if not found."""
 
     def delete_node(self, node_id: str) -> bool:
         """Delete a node. Returns True if existed."""
 
-    def list_nodes(self, node_type: Optional["NodeType"] = None) -> list["GraphNode"]:
+    def list_nodes(self, node_type: "NodeType | None" = None) -> list["GraphNode"]:
         """List all nodes, optionally filtered by type."""
 
     # ── Link operations ──
