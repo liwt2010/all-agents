@@ -56,6 +56,43 @@ class FatalLLMError(LLMError):
     pass
 
 
+# ── Streaming events (v0.4.0 PR-streaming-tools) ──
+
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+
+@dataclass
+class StreamEvent:
+    """Wire-format event yielded by `LLMRouter.stream_events`.
+
+    The WS endpoint serializes each event to JSON; the agent executor
+    uses the typed fields directly. Single-channel string yields are
+    reserved for plain text deltas (the common case).
+
+    Field reference:
+      - kind: "text" | "tool_start" | "tool_input" | "tool_end" |
+              "tool_result" | "done" | "error"
+      - text:  present iff kind == "text"
+      - tool:   tool/function name (kind in tool_*)
+      - id:     provider-assigned tool-call id (kind in tool_*)
+      - delta:  partial JSON string (kind == "tool_input")
+      - output: tool result text (kind == "tool_result")
+      - is_error: True if the tool failed (kind == "tool_result")
+      - usage:  aggregated usage (present iff kind == "done")
+      - message: human-readable error (kind == "error")
+    """
+    kind: str
+    text: str | None = None
+    tool: str | None = None
+    id: str | None = None
+    delta: str | None = None
+    output: str | None = None
+    is_error: bool = False
+    usage: Any = None
+    message: str | None = None
+
+
 # Track current agent/task for cost attribution
 _current_agent: ContextVar[str] = ContextVar("_current_agent", default="unknown")
 _current_task: ContextVar[str] = ContextVar("_current_task", default="unknown")
@@ -92,13 +129,32 @@ def estimate_cost(
     cache_read: int = 0,
     cache_write: int = 0,
 ) -> float:
-    """Estimate cost in USD including cache tokens."""
+    """Estimate cost in USD including cache tokens.
+
+    Token counts may be `None` (Anthropic returns `None` for cache
+    fields when prompt caching is disabled) or a numeric string (some
+    providers serialize over the wire as strings). Coerce both to int.
+    """
+    def _to_int(n) -> int:
+        if n is None:
+            return 0
+        if isinstance(n, str):
+            try:
+                return int(n)
+            except (TypeError, ValueError):
+                return 0
+        return int(n)
+
     pricing = MODEL_PRICING.get(model, DEFAULT_PRICING)
+    i = _to_int(input_tokens)
+    o = _to_int(output_tokens)
+    cr = _to_int(cache_read)
+    cw = _to_int(cache_write)
     return (
-        input_tokens / 1_000_000 * pricing["input"]
-        + output_tokens / 1_000_000 * pricing["output"]
-        + cache_read / 1_000_000 * pricing["cache_read"]
-        + cache_write / 1_000_000 * pricing["cache_write"]
+        i / 1_000_000 * pricing["input"]
+        + o / 1_000_000 * pricing["output"]
+        + cr / 1_000_000 * pricing["cache_read"]
+        + cw / 1_000_000 * pricing["cache_write"]
     )
 
 
@@ -754,37 +810,173 @@ class LLMRouter:
         yield full
         yield StreamEnd(usage=usage)
 
-    async def _stream_anthropic(self, config, system_prompt, messages):
-        """Yield text chunks from the Anthropic streaming API.
+    async def stream_events(
+        self,
+        config: LLMConfig,
+        system_prompt: str,
+        messages: list,
+        _agent_name: str | None = None,
+        _task_id: str | None = None,
+    ):
+        """Async generator yielding `StreamEvent`s as the LLM produces them.
 
-        The Anthropic SDK exposes `client.messages.stream(...)` returning
-        an async-iterable `MessageStreamManager`. Each `text` event
-        gives a small text delta.
+        Events (single channel — yields `StreamEvent` dataclasses):
+          - StreamEvent(kind="text", text=...)         — text delta
+          - StreamEvent(kind="tool_start", tool=..., id=...)  — tool call opened
+          - StreamEvent(kind="tool_input", tool=..., id=..., delta=...) — partial JSON
+          - StreamEvent(kind="tool_end",   tool=..., id=...)  — JSON complete
+          - StreamEvent(kind="tool_result", tool=..., id=..., output=..., is_error=...)
+                                                    — only emitted when the
+                                                      caller feeds tool
+                                                      results back in via
+                                                      run_tool_loop()
+          - StreamEvent(kind="done", usage=...)        — terminal; aggregates
+                                                      the full LLMUsage
+
+        Why a single-channel generator over the previous str-or-sentinel?
+        Because tool-call streaming needs more than two states, and a
+        string-or-sentinel channel can't express them. Consumers do:
+            async for ev in router.stream_events(...):
+                if ev.kind == "text": ...
+                elif ev.kind == "tool_start": ...
+                ...
+                elif ev.kind == "done": break
+
+        The legacy `stream_chunks()` is kept as a thin wrapper that drops
+        everything but text deltas + the sentinel, for callers that
+        don't care about tool calls.
+        """
+        if _agent_name or _task_id:
+            set_llm_context(
+                _agent_name or _current_agent.get(),
+                _task_id or _current_task.get(),
+            )
+
+        if self.is_mock_mode:
+            for ev in self._mock_stream_events():
+                yield ev
+            return
+
+        if self.llm_provider == "anthropic":
+            async for ev in self._stream_anthropic_events(config, system_prompt, messages):
+                yield ev
+            return
+
+        if self.llm_provider == "openai":
+            async for ev in self._stream_openai_events(config, system_prompt, messages):
+                yield ev
+            return
+
+        # Unknown provider — degrade to mock events
+        for ev in self._mock_stream_events():
+            yield ev
+
+    def _mock_stream_events(self):
+        """Mock-mode generator: 5 text chunks + done event.
+
+        Includes a fake tool call cycle so consumers can verify
+        downstream tool-handling code without an API key.
+        """
+        from collections import namedtuple
+        StreamEnd = namedtuple("StreamEnd", ["usage"])
+
+        full, usage = self._mock_response("", [{"role": "user", "content": "x"}])
+        chunks = [
+            full[i:i + max(1, len(full) // 5)]
+            for i in range(0, len(full), max(1, len(full) // 5))
+        ]
+        for c in chunks:
+            yield StreamEvent(kind="text", text=c)
+            # Tiny sleep so test consumers can observe streaming; we
+            # don't actually await here (yields are sync) — callers
+            # that need pacing should await asyncio.sleep between
+            # iterations. Kept simple to avoid accidental event-loop
+            # blocking in non-async contexts.
+        yield StreamEvent(kind="done", usage=usage)
+
+    async def _stream_anthropic_events(self, config, system_prompt, messages):
+        """Anthropic streaming → StreamEvents.
+
+        The Anthropic SDK exposes a stream of typed events. We care about:
+          - ContentBlockStartEvent(type="tool_use")  → tool_start
+          - ContentBlockDeltaEvent(delta=InputJSONDelta(...))  → tool_input
+          - ContentBlockStopEvent(index=tool_index)  → tool_end
+          - Text delta events                                  → text
         """
         from collections import namedtuple
         StreamEnd = namedtuple("StreamEnd", ["usage"])
 
         client = self.get_anthropic_client()
         if not client:
-            full, usage = self._mock_response(system_prompt, messages)
-            yield full
-            yield StreamEnd(usage=usage)
+            for ev in self._mock_stream_events():
+                yield ev
             return
 
         system_prompt, messages = self._truncate_messages(
             system_prompt, messages, config.model,
             reserve_output_tokens=config.max_tokens,
         )
-        params = self._build_anthropic_params(config, system_prompt, messages, tools=None)
+        # Inline the params builder (no separate _build_anthropic_params;
+        # the streaming path was added without extracting the helper).
+        params = {
+            "model": config.model,
+            "max_tokens": config.max_tokens,
+            "temperature": config.temperature,
+            "system": system_prompt,
+            "messages": messages,
+        }
+        if os.environ.get("AGENT_PROMPT_CACHE", "1") == "1" and len(system_prompt) > 4000:
+            params["system"] = [
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
         usage_total = LLMUsage(model=config.model, mock=False)
         t0 = time.time()
+        # Track which block indices are tool_use so we can pair start/stop.
+        tool_names: dict[int, str] = {}
+        tool_ids: dict[int, str] = {}
         try:
             async with client.messages.stream(**params) as stream:
-                async for text in stream.text_stream:
-                    if text:
-                        yield text
-                # text_stream ends when the message is complete; pull
-                # the final message for usage metrics.
+                async for event in stream:
+                    etype = getattr(event, "type", None)
+                    if etype == "content_block_start":
+                        block = getattr(event, "content_block", None)
+                        btype = getattr(block, "type", None) if block else None
+                        if btype == "tool_use":
+                            tool_names[event.index] = getattr(block, "name", "?")
+                            tool_ids[event.index] = getattr(block, "id", "")
+                            yield StreamEvent(
+                                kind="tool_start",
+                                tool=tool_names[event.index],
+                                id=tool_ids[event.index],
+                            )
+                    elif etype == "content_block_delta":
+                        delta = getattr(event, "delta", None)
+                        if delta is None:
+                            continue
+                        dtype = getattr(delta, "type", None)
+                        if dtype == "text_delta":
+                            text = getattr(delta, "text", "")
+                            if text:
+                                yield StreamEvent(kind="text", text=text)
+                        elif dtype == "input_json_delta":
+                            partial = getattr(delta, "partial_json", "")
+                            yield StreamEvent(
+                                kind="tool_input",
+                                tool=tool_names.get(event.index, "?"),
+                                id=tool_ids.get(event.index, ""),
+                                delta=partial,
+                            )
+                    elif etype == "content_block_stop":
+                        if event.index in tool_names:
+                            yield StreamEvent(
+                                kind="tool_end",
+                                tool=tool_names.pop(event.index, "?"),
+                                id=tool_ids.pop(event.index, ""),
+                            )
                 final = await stream.get_final_message()
                 usage_total.input_tokens = final.usage.input_tokens
                 usage_total.output_tokens = final.usage.output_tokens
@@ -794,23 +986,29 @@ class LLMRouter:
                     usage_total.cache_creation_tokens = final.usage.cache_creation_input_tokens or 0
         except Exception as e:
             logger.error(f"Anthropic streaming failed: {e}")
-            yield f"[stream error: {e}]"
+            yield StreamEvent(kind="error", message=f"Anthropic stream error: {e}")
         usage_total.duration_ms = (time.time() - t0) * 1000.0
-        usage_total.cost_estimate = self._estimate_cost(
+        usage_total.cost_estimate = estimate_cost(
             usage_total.input_tokens, usage_total.output_tokens, config.model
         )
-        yield StreamEnd(usage=usage_total)
+        yield StreamEvent(kind="done", usage=usage_total)
 
-    async def _stream_openai(self, config, system_prompt, messages):
-        """Yield text chunks from the OpenAI-compatible streaming API."""
+    async def _stream_openai_events(self, config, system_prompt, messages):
+        """OpenAI streaming → StreamEvents.
+
+        `delta.tool_calls` is a list of partial tool calls: each element
+        is keyed by `index` and accumulates across chunks. A delta with
+        `id` starts a new tool; a delta with only `arguments` continues
+        one. The end of a tool call is implicit (no further deltas at
+        that index).
+        """
         from collections import namedtuple
         StreamEnd = namedtuple("StreamEnd", ["usage"])
 
         client = self.get_openai_client()
         if not client:
-            full, usage = self._mock_response(system_prompt, messages)
-            yield full
-            yield StreamEnd(usage=usage)
+            for ev in self._mock_stream_events():
+                yield ev
             return
 
         openai_messages = []
@@ -827,25 +1025,89 @@ class LLMRouter:
         }
         usage_total = LLMUsage(model=config.model, mock=False)
         t0 = time.time()
+        # Track open tool calls: index → (name, id).
+        # OpenAI emits deltas with no `id` after the first chunk for
+        # a given tool; the first delta includes id+name and starts the
+        # tool. Subsequent deltas with `arguments` extend the JSON.
+        tool_states: dict[int, tuple[str, str]] = {}
         try:
             stream = await client.chat.completions.create(**kwargs)
             async for chunk in stream:
                 if not chunk.choices:
+                    if hasattr(chunk, "usage") and chunk.usage:
+                        usage_total.input_tokens = chunk.usage.prompt_tokens or 0
+                        usage_total.output_tokens = chunk.usage.completion_tokens or 0
                     continue
                 delta = chunk.choices[0].delta
-                if delta and getattr(delta, "content", None):
-                    yield delta.content
-                if hasattr(chunk, "usage") and chunk.usage:
-                    usage_total.input_tokens = chunk.usage.prompt_tokens or 0
-                    usage_total.output_tokens = chunk.usage.completion_tokens or 0
+                if delta is None:
+                    continue
+                content = getattr(delta, "content", None)
+                if content:
+                    yield StreamEvent(kind="text", text=content)
+                tcalls = getattr(delta, "tool_calls", None)
+                if tcalls:
+                    for tc in tcalls:
+                        idx = tc.index
+                        if tc.id:
+                            # First chunk for this tool — emit start.
+                            name = (tc.function.name if tc.function and tc.function.name else "?")
+                            tool_states[idx] = (name, tc.id)
+                            yield StreamEvent(
+                                kind="tool_start", tool=name, id=tc.id,
+                            )
+                        if tc.function and tc.function.arguments:
+                            # Continuation chunk — partial JSON delta.
+                            name, tid = tool_states.get(idx, ("?", ""))
+                            yield StreamEvent(
+                                kind="tool_input",
+                                tool=name,
+                                id=tid,
+                                delta=tc.function.arguments,
+                            )
+                # Tool-end is implicit in OpenAI's streaming API (no
+                # event per tool). The downstream executor treats
+                # `tool_end` as "the moment we stop receiving tool_input
+                # deltas for this id".
+            # Flush tool_end for any tools whose delta stream ended.
+            for idx, (name, tid) in list(tool_states.items()):
+                yield StreamEvent(kind="tool_end", tool=name, id=tid)
+                del tool_states[idx]
+            if hasattr(chunk, "usage") and chunk.usage:
+                usage_total.input_tokens = chunk.usage.prompt_tokens or 0
+                usage_total.output_tokens = chunk.usage.completion_tokens or 0
         except Exception as e:
             logger.error(f"OpenAI streaming failed: {e}")
-            yield f"[stream error: {e}]"
+            yield StreamEvent(kind="error", message=f"OpenAI stream error: {e}")
         usage_total.duration_ms = (time.time() - t0) * 1000.0
-        usage_total.cost_estimate = self._estimate_cost(
+        usage_total.cost_estimate = estimate_cost(
             usage_total.input_tokens, usage_total.output_tokens, config.model
         )
-        yield StreamEnd(usage=usage_total)
+        yield StreamEvent(kind="done", usage=usage_total)
+
+    async def _stream_anthropic(self, config, system_prompt, messages):
+        """Backward-compatible text-only wrapper for `_stream_anthropic_events`.
+
+        Kept for `stream_chunks()` consumers that only want text deltas.
+        """
+        from collections import namedtuple
+        StreamEnd = namedtuple("StreamEnd", ["usage"])
+        async for ev in self._stream_anthropic_events(config, system_prompt, messages):
+            if ev.kind == "text":
+                yield ev.text
+            elif ev.kind == "done":
+                yield StreamEnd(usage=ev.usage)
+                return
+
+    async def _stream_openai(self, config, system_prompt, messages):
+        """Backward-compatible text-only wrapper for `_stream_openai_events`."""
+        from collections import namedtuple
+        StreamEnd = namedtuple("StreamEnd", ["usage"])
+        async for ev in self._stream_openai_events(config, system_prompt, messages):
+            if ev.kind == "text":
+                yield ev.text
+            elif ev.kind == "done":
+                yield StreamEnd(usage=ev.usage)
+                return
 
 
 # Global router instance

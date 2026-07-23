@@ -97,7 +97,6 @@ class TestLLMStreamWS:
             "Router-level stream_chunks tests above prove the wire "
             "format (chunk/done/ping) is correct."
         )
-        )
 
     def _get_token(self, monkeypatch=None):
         from agent_system.core.auth.jwt import AuthService
@@ -223,7 +222,6 @@ class TestStreamCleanup:
             "served by real uvicorn (verified via websockets client). "
             "Router-level stream_chunks tests above prove the wire "
             "format (chunk/done/ping) is correct."
-        )
         )
 
     @pytest.mark.usefixtures("_ws_disabled")

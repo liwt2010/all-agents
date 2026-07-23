@@ -1,16 +1,25 @@
 """Streaming LLM WebSocket endpoint (PR v0.2.0).
 
 `GET /api/ws/llm/stream?token=...&prompt=...` upgrades to a WebSocket
-and emits text chunks as the LLM produces them. Used for chat UX where
-the user sees tokens arrive incrementally instead of waiting for the
-full response.
+and emits LLM events as the LLM produces them. Used for chat UX where
+the user sees tokens arrive incrementally instead of waiting for
+the full response.
 
-Wire format (server -> client):
-  {"type": "chunk", "data": "<text>"}     # one or more
-  {"type": "done",  "data": {"input_tokens": .., "output_tokens": ..,
-                              "duration_ms": .., "model": "..."}}
-  {"type": "error", "data": "<message>"}
-  {"type": "ping"}                          # keep-alive every 15s
+Wire format (server -> client, v0.4.0):
+  {"type": "text",        "data": "<text>"}            # one or more
+  {"type": "tool_start",   "data": {"tool": "...", "id": "..."}}
+  {"type": "tool_input",   "data": {"tool": "...", "id": "...",
+                                                  "delta": "..."}}
+  {"type": "tool_end",     "data": {"tool": "...", "id": "..."}}
+  {"type": "done",         "data": {"input_tokens": .., "output_tokens": ..,
+                                                  "duration_ms": .., "model": "..."}}
+  {"type": "error",        "data": "<message>"}
+  {"type": "ping"}                                       # keep-alive every 15s
+
+Backwards compat: the legacy {"type":"chunk","data":<text>} shape
+matches {"type":"text","data":<text>} — the existing client-side
+`chunk` event continues to work because the data field is the same
+text payload. The new event types (`tool_*`) are additive.
 
 Auth: Bearer token via `?token=` query param (browsers can't set
 headers on WS upgrade). Same JWT verification as the HTTP API.
@@ -81,14 +90,51 @@ async def llm_stream_ws(ws: WebSocket) -> None:
     keepalive_task = asyncio.create_task(keepalive())
 
     try:
-        async for item in llm_router.stream_chunks(
+        async for ev in llm_router.stream_events(
             config, system_prompt, messages,
             _agent_name="llm_stream",
             _task_id=payload.sub,
         ):
-            # StreamEnd sentinel: emit the final usage message
-            if not isinstance(item, str):
-                usage = item.usage
+            if ev.kind == "text":
+                # Backwards-compat alias: also emit the old
+                # {"type": "chunk", ...} alongside the new
+                # {"type": "text", ...} so legacy clients keep
+                # working. Two-frame approach doubles traffic
+                # by ~2x; remove in v0.5 once we have a single
+                # client shape and can audit users.
+                await ws.send_text(json.dumps({
+                    "type": "chunk", "data": ev.text
+                }))
+                await ws.send_text(json.dumps({
+                    "type": "text", "data": ev.text
+                }))
+            elif ev.kind == "tool_start":
+                await ws.send_text(json.dumps({
+                    "type": "tool_start",
+                    "data": {"tool": ev.tool, "id": ev.id},
+                }))
+            elif ev.kind == "tool_input":
+                await ws.send_text(json.dumps({
+                    "type": "tool_input",
+                    "data": {"tool": ev.tool, "id": ev.id, "delta": ev.delta},
+                }))
+            elif ev.kind == "tool_end":
+                await ws.send_text(json.dumps({
+                    "type": "tool_end",
+                    "data": {"tool": ev.tool, "id": ev.id},
+                }))
+            elif ev.kind == "tool_result":
+                await ws.send_text(json.dumps({
+                    "type": "tool_result",
+                    "data": {
+                        "tool": ev.tool,
+                        "id": ev.id,
+                        "output": ev.output,
+                        "is_error": ev.is_error,
+                    },
+                }))
+            elif ev.kind == "done":
+                usage = ev.usage
                 await ws.send_text(json.dumps({
                     "type": "done",
                     "data": {
@@ -100,7 +146,12 @@ async def llm_stream_ws(ws: WebSocket) -> None:
                     },
                 }))
                 break
-            await ws.send_text(json.dumps({"type": "chunk", "data": item}))
+            elif ev.kind == "error":
+                await ws.send_text(json.dumps({
+                    "type": "error",
+                    "data": ev.message or "unknown error",
+                }))
+                break
     except WebSocketDisconnect:
         logger.debug("LLM stream WS: client disconnected")
     except Exception as e:

@@ -134,6 +134,23 @@ of each release.
   - Tests: 15 new in `test_storage_rls.py` cover migration surface,
     tenant-id validation, GUC emission, and the cross-tenant
     isolation contract (simulated against sqlite for portability).
+- **Streaming tool-call events (PR v0.4.0)**: the LLM stream now
+  surfaces tool calls as first-class events, not just text deltas.
+  `LLMRouter.stream_events()` async generator yields `StreamEvent`
+  dataclasses with kinds `text` / `tool_start` / `tool_input` /
+  `tool_end` / `tool_result` / `done` / `error`. Both Anthropic
+  (`content_block_start` / `input_json_delta` / `content_block_stop`)
+  and OpenAI (`delta.tool_calls` array) backends are supported; mock
+  mode emits the same shape so tests don't need an API key.
+  `/api/ws/llm/stream` bridges events to JSON frames (e.g.
+  `{"type":"tool_start","data":{"tool":"search","id":"call_abc"}}`)
+  while preserving the legacy `chunk` event for backwards compat.
+  Tests: 9 new in `test_llm_stream_events.py` cover event shape,
+  mock-mode, Anthropic tool-call sequence, OpenAI tool-call sequence,
+  and the `stream_chunks()` compat shim. Also fixes a pre-existing
+  latent bug: `estimate_cost` now coerces `None` / string token
+  counts to int (Anthropic returns `None` for cache fields when
+  caching is disabled; some providers serialize integers as strings).
 - **OpenTelemetry FastAPI auto-instrumentation (PR v0.2.0)**: when
   `AGENT_OTEL_ENABLED=true`, the lifespan automatically calls
   `FastAPIInstrumentor.instrument_app(app)` after `init_otel_exporter()`
