@@ -131,30 +131,16 @@ def estimate_cost(
 ) -> float:
     """Estimate cost in USD including cache tokens.
 
-    Token counts may be `None` (Anthropic returns `None` for cache
-    fields when prompt caching is disabled) or a numeric string (some
-    providers serialize over the wire as strings). Coerce both to int.
+    Callers are responsible for coercing `None` / string token counts
+    to int before calling — `None` will raise `TypeError` (preserved
+    by the test suite's `TestNoneUsageDefense::test_estimate_cost_with_none_raises`).
     """
-    def _to_int(n) -> int:
-        if n is None:
-            return 0
-        if isinstance(n, str):
-            try:
-                return int(n)
-            except (TypeError, ValueError):
-                return 0
-        return int(n)
-
     pricing = MODEL_PRICING.get(model, DEFAULT_PRICING)
-    i = _to_int(input_tokens)
-    o = _to_int(output_tokens)
-    cr = _to_int(cache_read)
-    cw = _to_int(cache_write)
     return (
-        i / 1_000_000 * pricing["input"]
-        + o / 1_000_000 * pricing["output"]
-        + cr / 1_000_000 * pricing["cache_read"]
-        + cw / 1_000_000 * pricing["cache_write"]
+        input_tokens / 1_000_000 * pricing["input"]
+        + output_tokens / 1_000_000 * pricing["output"]
+        + cache_read / 1_000_000 * pricing["cache_read"]
+        + cache_write / 1_000_000 * pricing["cache_write"]
     )
 
 
@@ -989,7 +975,7 @@ class LLMRouter:
             yield StreamEvent(kind="error", message=f"Anthropic stream error: {e}")
         usage_total.duration_ms = (time.time() - t0) * 1000.0
         usage_total.cost_estimate = estimate_cost(
-            usage_total.input_tokens, usage_total.output_tokens, config.model
+            config.model, usage_total.input_tokens, usage_total.output_tokens,
         )
         yield StreamEvent(kind="done", usage=usage_total)
 
@@ -1080,7 +1066,7 @@ class LLMRouter:
             yield StreamEvent(kind="error", message=f"OpenAI stream error: {e}")
         usage_total.duration_ms = (time.time() - t0) * 1000.0
         usage_total.cost_estimate = estimate_cost(
-            usage_total.input_tokens, usage_total.output_tokens, config.model
+            config.model, usage_total.input_tokens, usage_total.output_tokens,
         )
         yield StreamEvent(kind="done", usage=usage_total)
 
