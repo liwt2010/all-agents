@@ -30,6 +30,12 @@ find your role below and follow the link.
 - [RATE_LIMIT.md](RATE_LIMIT.md) — sliding window + Redis backend
   (v0.2.0).
 
+## For gRPC / service-to-service integrators
+
+- [GRPC.md](GRPC.md) — the `.proto`-driven gRPC transport
+  (v0.5.0). Submit/get/list tasks and stream LLM tokens without
+  HTTP. Mirrors the REST API exactly.
+
 ## For observability engineers
 
 - [METRICS.md](METRICS.md) — Prometheus metrics catalog (11 metrics).

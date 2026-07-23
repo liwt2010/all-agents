@@ -1,0 +1,180 @@
+// agent_system.proto — gRPC service for the Agent System platform.
+//
+// Mirrors the REST API at /api/* so that gRPC clients (notebooks,
+// microservices, partner integrations) can drive the platform with
+// the same semantics. The endpoints are the ones worth keeping
+// tightly-typed over HTTP: task submission, polling, and the
+// streaming LLM channel.
+//
+// When `grpcio` is installed, run:
+//   python -m grpc_tools.protoc -I src/agent_system/grpc/proto \\
+//     --python_out=src/agent_system/grpc/_pb2 \\
+//     --grpc_python_out=src/agent_system/grpc/_pb2_grpc \\
+//     src/agent_system/grpc/proto/agent_system.proto
+//
+// and then `python -m agent_system.grpc.server` starts a gRPC
+// listener on :50051 that proxies to the same in-process
+// `TaskStore` + `LLMRouter` the REST API uses.
+//
+// Wire format is identical to the REST/WS API where they overlap —
+// the goal is one backend, two transports.
+
+syntax = "proto3";
+
+package agent_system.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// ── Common ──
+
+message TaskID {
+  string value = 1;
+}
+
+message Empty {}
+
+message Ack {
+  bool ok = 1;
+  string message = 2;
+}
+
+// ── Task submission + retrieval ──
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_PENDING = 1;
+  TASK_STATUS_RUNNING = 2;
+  TASK_STATUS_COMPLETED = 3;
+  TASK_STATUS_FAILED = 4;
+  TASK_STATUS_CANCELLED = 5;
+}
+
+message Task {
+  string id = 1;
+  TaskStatus status = 2;
+  string input = 3;
+  string agent = 4;
+  string output_json = 5;       // serialized OutputSchema.payload
+  string error = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  int32 input_tokens = 9;
+  int32 output_tokens = 10;
+}
+
+message SubmitTaskRequest {
+  string input = 1;
+  string agent = 2;             // "product", "tech", "ceo", custom id
+  string tenant_id = 3;         // inferred from JWT in REST; gRPC
+                                 // clients pass it explicitly
+  google.protobuf.Struct metadata = 4;  // free-form
+}
+
+message GetTaskRequest {
+  string id = 1;
+  string tenant_id = 2;
+}
+
+message ListTasksRequest {
+  string tenant_id = 1;
+  TaskStatus status = 2;        // 0 = all
+  int32 limit = 3;              // 1..200
+  string cursor = 4;            // opaque
+}
+
+message ListTasksResponse {
+  repeated Task tasks = 1;
+  string next_cursor = 2;        // "" if done
+}
+
+// ── Streaming LLM ──
+//
+// Mirrors /api/ws/llm/stream wire format. The four event kinds are
+// encoded in a oneof so consumers switch on a single field.
+
+message LLMTextDelta {
+  string text = 1;
+}
+
+message LLMToolStart {
+  string tool = 1;
+  string id = 2;
+}
+
+message LLMToolInput {
+  string tool = 1;
+  string id = 2;
+  string delta = 3;
+}
+
+message LLMToolEnd {
+  string tool = 1;
+  string id = 2;
+}
+
+message LLMToolResult {
+  string tool = 1;
+  string id = 2;
+  string output = 3;
+  bool is_error = 4;
+}
+
+message LLMError {
+  string message = 1;
+}
+
+message LLMUsage {
+  int32 input_tokens = 1;
+  int32 output_tokens = 2;
+  int32 cache_read_tokens = 3;
+  int32 cache_creation_tokens = 4;
+  int32 duration_ms = 5;
+  string model = 6;
+  bool mock = 7;
+}
+
+message LLMDone {
+  LLMUsage usage = 1;
+}
+
+message StreamLLMRequest {
+  string prompt = 1;
+  string system_prompt = 2;
+  string model = 3;             // "claude-haiku-4-5-20251001" etc.
+  string tenant_id = 4;
+}
+
+message LLMEvent {
+  oneof body {
+    LLMTextDelta text = 1;
+    LLMToolStart tool_start = 2;
+    LLMToolInput tool_input = 3;
+    LLMToolEnd tool_end = 4;
+    LLMToolResult tool_result = 5;
+    LLMError error = 6;
+    LLMDone done = 7;
+  }
+}
+
+// ── Service ──
+
+service AgentSystemService {
+  // Submit a task and return the TaskID. Async on the server side
+  // (returns TaskStatus.PENDING); poll GetTask for progress.
+  rpc SubmitTask(SubmitTaskRequest) returns (Task);
+
+  // Fetch a task by ID. Returns NOT_FOUND if the task doesn't
+  // exist or belongs to a different tenant.
+  rpc GetTask(GetTaskRequest) returns (Task);
+
+  // Stream tasks matching a filter. Server-side pagination via
+  // opaque cursor; client passes back the cursor until next_cursor
+  // is empty.
+  rpc ListTasks(ListTasksRequest) returns (stream ListTasksResponse);
+
+  // Stream LLM tokens (and tool events) for a prompt. Returns
+  // immediately with a stream of LLMEvent messages. The final
+  // message in any successful stream has `done` set.
+  rpc StreamLLM(StreamLLMRequest) returns (stream LLMEvent);
+}

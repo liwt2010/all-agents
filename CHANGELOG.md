@@ -10,7 +10,21 @@ of each release.
 ## [Unreleased]
 
 ### Added
-- *(none yet — please add entries here when landing a change)*
+- **gRPC transport (PR v0.5.0)**: agents can be reached over gRPC
+  in addition to REST and WebSocket. The new
+  `src/agent_system/grpc/proto/agent_system.proto` defines four
+  RPCs — `SubmitTask`, `GetTask`, `ListTasks` (server-streaming),
+  `StreamLLM` (server-streaming text + tool events). The
+  transport-neutral `GrpcServiceHandler` class reuses the same
+  in-process `TaskStore` and `LLMRouter` the REST/WS APIs use;
+  the gRPC servicer is a thin shim that translates
+  protobuf messages to/from dict-shaped events. To run:
+  `pip install grpcio grpcio-tools && python -m agent_system.grpc.codegen
+  && python -m agent_system.grpc.server` (defaults to :50051,
+  override with `AGENT_GRPC_PORT`). Tests: 25 new in
+  `test_grpc_handlers.py` exercise the handler class
+  directly without grpcio installed — the contract is the dict
+  shape, which the generated servicer translates.
 
 ### Changed
 - *(none yet)*
