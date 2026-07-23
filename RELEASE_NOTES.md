@@ -1,5 +1,76 @@
 # Agent System — Release Notes
 
+## v0.4.0 — 2026-07-22 (Streaming tool-call events)
+
+**Git tag:** `v0.4.0`
+**Scope:** new feature; backward compatible.
+**Commits since v0.3.0:** 2 (`a10a20a` + `e0bcfd5`).
+
+Production agents don't just generate text — they also call tools
+(search, code_exec, retrieval, …). v0.2.0's streaming endpoint
+exposed only text deltas, so the agent executor couldn't see tool
+calls and the chat UI could only show "..." while the LLM was
+working. v0.4.0 surfaces tool calls as first-class stream events.
+
+### Added
+
+- **`LLMRouter.stream_events()` async generator** — single-channel
+  emission of `StreamEvent` dataclasses with one of these `kind`s:
+  - `text` — incremental text delta (same payload as the v0.2.0
+    `chunk` sentinel path)
+  - `tool_start` — provider opened a tool call (`tool`, `id` set)
+  - `tool_input` — JSON fragment of the call arguments
+  - `tool_end` — tool arguments are complete
+  - `tool_result` — agent executor's result for the tool
+  - `done` — terminal; carries aggregated `LLMUsage`
+  - `error` — provider or transport error
+- **Both providers supported**:
+  - **Anthropic**: maps `content_block_start` (tool_use) →
+    `tool_start`; `input_json_delta` → `tool_input`;
+    `content_block_stop` → `tool_end`.
+  - **OpenAI**: maps `delta.tool_calls[].id` present → `tool_start`;
+    `.function.arguments` deltas → `tool_input`; no more deltas at
+    a given index → `tool_end`.
+- **WS endpoint bridges to JSON frames** — `/api/ws/llm/stream` now
+  emits `{"type":"tool_start","data":{"tool":"search","id":"..."}}`,
+  `{"type":"tool_input",...}`, etc. The legacy `chunk` event shape
+  is preserved alongside the new `text` event for backwards compat
+  (will be removed in v0.5 once we've audited all consumers).
+- **Legacy `stream_chunks()` is preserved** as a thin wrapper that
+  drops tool events and yields the str-or-sentinel sequence. All
+  v0.2.0-era callers keep working unchanged.
+- **9 new tests** in `test_llm_stream_events.py` cover event-shape
+  semantics, mock-mode streaming, Anthropic tool-call sequence,
+  OpenAI tool-call sequence, and the `stream_chunks()` compat shim.
+
+### Fixed
+
+- **Pre-existing latent bug: `estimate_cost` arg order** — the
+  streaming helpers passed `(input_tokens, output_tokens, model)`
+  but the function signature is `(model, input_tokens, output_tokens,
+  cache_read, cache_write)`. In practice the cost came out wildly
+  wrong for streaming calls; in pathological cases (None cache
+  values from non-standard proxies) the division raised TypeError.
+  Caught by the new tests. Fix: pass `model` first.
+
+### Tests
+
+- 1021 passed / 5 skipped / 2 xfail / 3 known-fail (real-LLM gated)
+- +29 tests vs v0.3.0 (9 in `test_llm_stream_events.py` + 20 baseline
+  cleanup)
+
+### Migration from v0.3.x
+
+- **Client side (WS)**: no change required. Clients that listen
+  only for `{"type":"chunk",...}` keep working. To use the new
+  tool events, switch to `{"type":"text",...}` and add handlers
+  for `tool_start` / `tool_input` / `tool_end`.
+- **Server side (Python)**: code calling `LLMRouter.stream_chunks()`
+  keeps working. To consume the new events, switch to
+  `LLMRouter.stream_events()` (async generator of `StreamEvent`).
+
+---
+
 ## v0.3.0 — 2026-07-22 (GitHub App integration — roadmap pull-forward)
 
 **Git tag:** `v0.3.0`
