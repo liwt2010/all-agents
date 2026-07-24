@@ -67,6 +67,11 @@ class AuditLogEntry(BaseModel):
     session_id: str = ""          # user session correlation
     duration_ms: float = 0.0      # action execution time
 
+    # v0.6.0: collaboration — explicit task_id for fast task-scoped queries.
+    # Falls back to (resource_type="task", resource_id=task_id) when entries
+    # were written before this field was added.
+    task_id: str = ""
+
 
 # ── Log rotation setup ──
 
@@ -159,6 +164,7 @@ class AuditLogger:
         action: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        task_id: str | None = None,
         limit: int = 100,
     ) -> list[AuditLogEntry]:
         """Query audit log from in-memory store."""
@@ -168,6 +174,13 @@ class AuditLogger:
                 continue
             if action and entry.action != action:
                 continue
+            if task_id:
+                # Prefer explicit task_id; fall back to (resource_type,
+                # resource_id) so entries written before v0.6.0 still match.
+                if entry.task_id != task_id and not (
+                    entry.resource_type == "task" and entry.resource_id == task_id
+                ):
+                    continue
             results.append(entry)
             if len(results) >= limit:
                 break
@@ -390,6 +403,7 @@ class BatchAuditLogger:
         start_date: str | None = None,
         end_date: str | None = None,
         request_id: str | None = None,
+        task_id: str | None = None,
         limit: int = 100,
     ) -> list[AuditLogEntry]:
         """
@@ -397,6 +411,8 @@ class BatchAuditLogger:
 
         Filters:
             user_id, action, outcome, request_id: exact match
+            task_id: matches explicit task_id field OR legacy
+                (resource_type="task", resource_id=task_id).
             start_date, end_date: ISO date strings (YYYY-MM-DD), inclusive
 
         Limit applied AFTER filtering. Returns up to `limit` entries
@@ -441,6 +457,12 @@ class BatchAuditLogger:
                             continue
                         if request_id and entry.request_id != request_id:
                             continue
+                        if task_id:
+                            if entry.task_id != task_id and not (
+                                entry.resource_type == "task"
+                                and entry.resource_id == task_id
+                            ):
+                                continue
                         results.append(entry)
                         if len(results) >= limit:
                             return results
@@ -456,6 +478,7 @@ class BatchAuditLogger:
         action: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        task_id: str | None = None,
         limit: int = 100,
     ) -> list[AuditLogEntry]:
         """Query from in-memory store (legacy API)."""
@@ -465,6 +488,11 @@ class BatchAuditLogger:
                 continue
             if action and entry.action != action:
                 continue
+            if task_id:
+                if entry.task_id != task_id and not (
+                    entry.resource_type == "task" and entry.resource_id == task_id
+                ):
+                    continue
             results.append(entry)
             if len(results) >= limit:
                 break
