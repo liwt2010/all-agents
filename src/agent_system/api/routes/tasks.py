@@ -362,6 +362,107 @@ async def get_task_progress(
 
 
 # ---------------------------------------------------------------------------
+# v0.6.0 — Task collaboration primitives
+# ---------------------------------------------------------------------------
+class ClaimRequest(BaseModel):
+    """Optional CAS body for POST /api/tasks/{id}/claim.
+
+    If `expected_version` is supplied and doesn't match, the call
+    returns 409 with the current record so the client can refresh.
+    """
+    expected_version: int | None = None
+
+
+class ClaimResponse(BaseModel):
+    task_id: str
+    assignee_id: str
+    owner_id: str
+    version: int
+
+
+@router.post("/api/tasks/{task_id}/claim", response_model=ClaimResponse)
+async def claim_task(
+    task_id: str,
+    request: ClaimRequest | None = None,
+    user: User = Depends(_require_auth()),
+) -> ClaimResponse:
+    """Claim a task (set assignee_id = me).
+
+    Visibility:
+      - PRIVATE: only the owner can claim (own private task).
+      - TENANT_PUBLIC / GROUP / PROJECT / EXTERNAL: any user with
+        read access may claim.
+
+    Errors:
+      404 — task not found / cross-tenant
+      403 — access denied
+      409 — version conflict
+      422 — task already in a terminal state
+    """
+    from agent_system.storage.task_store import VersionConflict
+
+    task_store = get_task_store_singleton()
+    record = task_store.get(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    # ACL read check covers tenant isolation + visibility.
+    _ensure_can_read(user, record)
+    if record.status in ("completed", "failed", "cancelled"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"task is in terminal state: {record.status}",
+        )
+    expected = (request or ClaimRequest()).expected_version
+    if expected is None:
+        # No CAS requested — use the current version so update_fields is
+        # happy. If someone else mutated it between read and write we
+        # still surface that as a 409 (the "no CAS" path just means the
+        # client doesn't want to specify a version).
+        expected = record.version
+    try:
+        updated = task_store.update_fields(
+            task_id, expected_version=expected, assignee_id=user.id,
+        )
+    except VersionConflict as vc:
+        # Surface the actual record so the client can refresh.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "version conflict",
+                "expected_version": vc.expected,
+                "actual_version": vc.actual,
+                "current": {
+                    "task_id": vc.current.id,
+                    "owner_id": vc.current.owner_id,
+                    "assignee_id": vc.current.assignee_id,
+                    "version": vc.current.version,
+                },
+            },
+        )
+    audit_logger = get_audit_logger_singleton()
+    await audit_logger.log(AuditLogEntry(
+        user_id=user.id,
+        action="task.claimed",
+        resource_id=task_id,
+        resource_type="task",
+        task_id=task_id,
+        tenant_id=user.tenant_id,
+        details={
+            "assignee_id": updated.assignee_id,
+            "owner_id": updated.owner_id,
+            "version": updated.version,
+        },
+        outcome="success",
+    ))
+    return ClaimResponse(
+        task_id=updated.id,
+        assignee_id=updated.assignee_id or "",
+        owner_id=updated.owner_id,
+        version=updated.version,
+    )
+
+
+# ---------------------------------------------------------------------------
 # WS /api/ws/{task_id} - WebSocket for real-time progress
 # ---------------------------------------------------------------------------
 @router.websocket("/api/ws/{task_id}")
