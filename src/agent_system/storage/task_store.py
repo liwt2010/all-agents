@@ -41,6 +41,16 @@ class TaskRecord(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # v0.6.0 — collaboration primitives
+    # owner_id is immutable (always the creator); assignee_id flows
+    # through claim / handoff; version is the CAS counter; visibility
+    # is one of SpaceVisibility enum values (string form for storage).
+    owner_id: str = ""
+    assignee_id: str | None = None
+    version: int = 1
+    visibility: str = "private"
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 # ── Backend interface ──
@@ -149,6 +159,13 @@ class PostgresTaskStore(TaskStore):
             started_at = Column(DateTime(timezone=True))
             completed_at = Column(DateTime(timezone=True))
             metadata_ = Column("metadata", JSON, default=dict)
+            # v0.6.0 — collaboration primitives
+            owner_id = Column(String, nullable=False, default="")
+            assignee_id = Column(String)
+            version = Column(self._sa.__import__("sqlalchemy").Integer, nullable=False, default=1)
+            visibility = Column(String, nullable=False, default="private")
+            created_at = Column(DateTime(timezone=True))
+            updated_at = Column(DateTime(timezone=True))
 
         self._TaskRow = TaskRow
         self._Base = Base
@@ -180,6 +197,12 @@ class PostgresTaskStore(TaskStore):
             row.started_at = record.started_at
             row.completed_at = record.completed_at
             row.metadata_ = record.metadata
+            row.owner_id = record.owner_id
+            row.assignee_id = record.assignee_id
+            row.version = record.version
+            row.visibility = record.visibility
+            row.created_at = record.created_at
+            row.updated_at = record.updated_at
             session.commit()
 
     def get(self, task_id: str) -> TaskRecord | None:
@@ -238,6 +261,12 @@ class PostgresTaskStore(TaskStore):
             started_at=row.started_at,
             completed_at=row.completed_at,
             metadata=row.metadata_ or {},
+            owner_id=row.owner_id or "",
+            assignee_id=row.assignee_id,
+            version=row.version or 1,
+            visibility=row.visibility or "private",
+            created_at=row.created_at,
+            updated_at=row.updated_at,
         )
 
 
