@@ -14,6 +14,16 @@ Key issue solved here:
   Fix: when pytest collects, force ALLOWED_FILE_ROOTS to include cwd so
   the tests can read source-tree files. Tests that explicitly need the
   stricter sandbox can set it manually.
+
+  Second issue solved here:
+  `load_dotenv()` injects whatever's in `.env` into os.environ, including
+  OPENAI_API_KEY. Real-LLM-gated tests use
+  `skipif(not (ANTHROPIC_API_KEY or OPENAI_API_KEY))`, so once a key
+  leaks in, those tests stop skipping and actually try to hit the API
+  (failing on bad / expired keys). Patch load_dotenv to *not* write
+  the two API-key variables unless the user explicitly exported them
+  in their shell. Real-LLM tests opt in via the shell (CI sets the
+  key explicitly; local devs set ANTHROPIC_API_KEY=/OPENAI_API_KEY=).
 """
 import os
 import sys
@@ -36,6 +46,38 @@ os.environ.setdefault(
     "AUTH_SECRET",
     "test-only-jwt-secret-32chars-long-enough-for-hs256",
 )
+
+# Patch python-dotenv so it doesn't leak API keys from `.env` into the
+# test process. The real-LLM test suite uses `skipif` on these vars to
+# stay green without a key; a leaky `.env` silently flips that switch
+# and the tests start hitting the API. Real-LLM tests still run when
+# the developer / CI explicitly exports the var in their shell — those
+# are set BEFORE pytest starts and load_dotenv() (default
+# override=False) leaves them alone.
+import dotenv as _dotenv  # noqa: E402
+
+_orig_load_dotenv = _dotenv.load_dotenv
+
+
+def _load_dotenv_no_api_keys(*args, **kwargs):
+    """load_dotenv wrapper that suppresses API-key vars from `.env`.
+
+    All other vars (ALLOWED_FILE_ROOTS, REDIS_URL, etc.) still load.
+    """
+    # Capture what was already in the environment BEFORE load_dotenv runs
+    # so we can restore the "user did not export this" state.
+    already_set = {
+        k: os.environ.get(k)
+        for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+        if k in os.environ
+    }
+    _orig_load_dotenv(*args, **kwargs)
+    for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        if k not in already_set and k in os.environ:
+            del os.environ[k]
+
+
+_dotenv.load_dotenv = _load_dotenv_no_api_keys
 
 
 def pytest_collection_modifyitems(config, items):
