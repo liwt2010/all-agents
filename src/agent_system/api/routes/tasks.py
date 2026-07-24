@@ -39,6 +39,12 @@ from agent_system.api.state import (
     get_task_store_singleton,
     get_ws_connections,
 )
+from agent_system.core.access_control import (
+    AccessControl,
+    Resource,
+    SpaceVisibility,
+    UserContext,
+)
 from agent_system.core.audit_logger import AuditLogEntry
 from agent_system.core.auth import User, require_auth
 from agent_system.core.checkpoint_tracker import LiveProgress
@@ -48,6 +54,58 @@ from agent_system.storage.task_store import TaskRecord
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["tasks"])
+
+# ── v0.6.0 AccessControl wiring ──
+
+# Single shared instance — AccessControl is stateless.
+_acl = AccessControl()
+
+
+def _to_user_ctx(user: User) -> UserContext:
+    """Map API User → AccessControl UserContext."""
+    return UserContext(
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        global_role=user.global_role.value if hasattr(user.global_role, "value") else str(user.global_role),
+        perm_group_ids=list(getattr(user, "perm_group_ids", []) or []),
+        group_ids=list(getattr(user, "group_ids", []) or []),
+        project_ids=list(getattr(user, "project_ids", []) or []),
+        is_agent=bool(getattr(user, "is_agent", False)),
+    )
+
+
+def _record_to_resource(record: TaskRecord) -> Resource:
+    """Map TaskRecord → AccessControl Resource, including visibility flags
+    stored on the record (parsed from the SpaceVisibility string)."""
+    metadata = dict(record.metadata or {})
+    perm_groups = metadata.pop("_perm_group_ids", None) or []
+    groups = metadata.pop("_group_ids", None) or []
+    projects = metadata.pop("_project_ids", None) or []
+    shared_with = metadata.pop("_shared_with", None) or []
+    return Resource(
+        id=record.id,
+        type="task",
+        tenant_id=record.tenant_id,
+        owner_id=record.owner_id or record.user_id,
+        visibility=SpaceVisibility(record.visibility or "private"),
+        perm_group_ids=list(perm_groups),
+        group_ids=list(groups),
+        project_ids=list(projects),
+        shared_with=list(shared_with),
+        metadata=metadata,
+    )
+
+
+def _ensure_can_read(user: User, record: TaskRecord) -> None:
+    """403 if the user can't see this task via AccessControl rules."""
+    if not _acl.can_read(_to_user_ctx(user), _record_to_resource(record)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
+def _ensure_can_write(user: User, record: TaskRecord) -> None:
+    """403 if the user can't modify this task via AccessControl rules."""
+    if not _acl.can_write(_to_user_ctx(user), _record_to_resource(record)):
+        raise HTTPException(status_code=403, detail="Access denied")
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +224,7 @@ async def submit_task(
             checkpoint_tracker.finish(task_id, success=True, output=result.get("output"))
 
         # 6. Persist result via TaskStore
+        now = datetime.now(timezone.utc)
         record = TaskRecord(
             id=task_id,
             agent=request.agent,
@@ -175,8 +234,14 @@ async def submit_task(
             user_id=user_id,
             output=result.get("output"),
             error=result.get("error"),
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
+            started_at=now,
+            completed_at=now,
+            owner_id=user_id,                # v0.6.0: creator is immutable owner
+            assignee_id=None,                # unclaimed by default
+            version=1,                       # v0.6.0: initial version
+            visibility="private",            # v0.6.0: most conservative default
+            created_at=now,
+            updated_at=now,
         )
         task_store.save(record)
 
@@ -185,6 +250,7 @@ async def submit_task(
             action="task.completed",
             resource_id=task_id,
             resource_type="task",
+            task_id=task_id,                 # v0.6.0: explicit task_id for query
             details={"agent": request.agent, "status": status, "tenant_id": tenant_id},
             outcome="success",
         ))
@@ -223,14 +289,12 @@ async def get_task(
     task_id: str,
     user: User = Depends(_require_auth()),
 ) -> TaskResponse:
-    """Get a task by id. Tenant-isolated."""
+    """Get a task by id. Tenant-isolated + AccessControl-filtered."""
     task_store = get_task_store_singleton()
     record = task_store.get(task_id)
     if not record:
         raise HTTPException(status_code=404, detail="Task not found")
-    # Tenant isolation: only the task's tenant can read it (admins can read all)
-    if record.tenant_id != user.tenant_id and user.global_role.value not in ("platform_admin", "tenant_admin"):
-        raise HTTPException(status_code=403, detail="Access denied")
+    _ensure_can_read(user, record)  # v0.6.0: also checks visibility (private / shared / etc.)
     return TaskResponse(
         task_id=record.id,
         status=record.status,
@@ -249,10 +313,13 @@ async def list_tasks(
     status: str | None = None,
     user: User = Depends(_require_auth()),
 ) -> dict[str, Any]:
-    """List recent tasks (tenant-isolated)."""
+    """List recent tasks. Tenant-isolated + AccessControl-filtered."""
     task_store = get_task_store_singleton()
     all_records = task_store.list(tenant_id=user.tenant_id, status=status, limit=limit + offset)
-    page = all_records[offset:offset + limit]
+    # v0.6.0: post-filter by AccessControl (SQL pushdown is a future TODO).
+    ctx = _to_user_ctx(user)
+    visible = [r for r in all_records if _acl.can_read(ctx, _record_to_resource(r))]
+    page = visible[offset:offset + limit]
     return {
         "tasks": [
             {
@@ -281,8 +348,15 @@ async def get_task_progress(
     progress = checkpoint_tracker.get_live(task_id)
     if not progress:
         raise HTTPException(status_code=404, detail="No progress info for this task")
-    # Tenant isolation
-    if progress.tenant_id != user.tenant_id and user.global_role.value not in ("platform_admin", "tenant_admin"):
+    # v0.6.0: AccessControl — read access to the task is required to see
+    # progress. Cross-tenant check is folded into can_read.
+    task_store = get_task_store_singleton()
+    record = task_store.get(task_id)
+    if record is not None:
+        _ensure_can_read(user, record)
+    elif progress.tenant_id != user.tenant_id and user.global_role.value not in (
+        "platform_admin", "tenant_admin"
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
     return progress
 

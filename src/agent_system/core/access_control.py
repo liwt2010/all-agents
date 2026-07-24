@@ -79,7 +79,8 @@ class AccessControl:
 
     Rules (ARCHITECTURE.md 11.2):
     1. Tenant isolation (hard) — cross-tenant access always denied
-    2. Platform admin — full access within tenant
+    2. Admin — `platform_admin` (all tenants) or `tenant_admin`
+       (within own tenant) get full read/write access
     3. Owner — full access to own resources
     4. Tenant Public — visible to all in the same tenant
     5. Explicit sharing — users in shared_with list
@@ -113,12 +114,17 @@ class AccessControl:
     def _check_access(self, user: UserContext, resource: Resource, access_type: str) -> bool:
         """Core access check logic"""
 
-        # Rule 1: Tenant isolation (hard)
-        if resource.tenant_id != user.tenant_id:
+        # Rule 1: Tenant isolation (hard) — platform_admin is the only
+        # exception (sees everything); tenant_admin still scoped to
+        # their own tenant.
+        if (
+            resource.tenant_id != user.tenant_id
+            and user.global_role != "platform_admin"
+        ):
             return False
 
-        # Rule 2: Platform admin — full access within tenant
-        if user.global_role == "platform_admin":
+        # Rule 2: Admin (platform or tenant).
+        if user.global_role in ("platform_admin", "tenant_admin"):
             return True
 
         # Rule 3: Owner — full access to own resources
