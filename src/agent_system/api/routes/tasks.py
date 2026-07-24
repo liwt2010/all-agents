@@ -462,6 +462,129 @@ async def claim_task(
     )
 
 
+class HandoffRequest(BaseModel):
+    to_user_id: str
+    expected_version: int | None = None
+    reason: str | None = None
+
+
+class HandoffResponse(BaseModel):
+    task_id: str
+    assignee_id: str
+    owner_id: str
+    version: int
+    from_assignee_id: str | None = None
+
+
+@router.post("/api/tasks/{task_id}/handoff", response_model=HandoffResponse)
+async def handoff_task(
+    task_id: str,
+    request: HandoffRequest,
+    user: User = Depends(_require_auth()),
+) -> HandoffResponse:
+    """Hand off a task to another user.
+
+    Permission: the owner, the current assignee, or a platform_admin.
+    Other readers (visibility-shared users) cannot hand off — only
+    someone with stake in the task can redirect it.
+
+    Errors:
+      404 — task not found / cross-tenant
+      403 — neither owner / assignee / admin
+      409 — version conflict
+      422 — same user, terminal state, or to_user_id is empty
+    """
+    from agent_system.storage.task_store import VersionConflict
+
+    if not request.to_user_id or not request.to_user_id.strip():
+        raise HTTPException(status_code=422, detail="to_user_id must be non-empty")
+
+    task_store = get_task_store_singleton()
+    record = task_store.get(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Handoff is a write/redirect action, not a read. The relevant
+    # permission check is "is the caller owner / current assignee /
+    # platform_admin", which we do below. We deliberately do NOT call
+    # _ensure_can_read here — the current assignee is allowed to
+    # hand off even if they only know the task because they were
+    # previously assigned, not because they have visibility.
+
+    role = (
+        user.global_role.value
+        if hasattr(user.global_role, "value")
+        else str(user.global_role)
+    )
+    is_owner = record.owner_id == user.id
+    is_current_assignee = record.assignee_id == user.id
+    is_platform_admin = role == "platform_admin"
+    if not (is_owner or is_current_assignee or is_platform_admin):
+        raise HTTPException(
+            status_code=403,
+            detail="only owner, current assignee, or platform_admin can hand off",
+        )
+    if record.status in ("completed", "failed", "cancelled"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"task is in terminal state: {record.status}",
+        )
+    if record.assignee_id == request.to_user_id:
+        raise HTTPException(
+            status_code=422,
+            detail=f"task is already assigned to {request.to_user_id}",
+        )
+    expected = request.expected_version
+    if expected is None:
+        expected = record.version
+    # Capture the previous assignee BEFORE update_fields mutates `record`
+    # in place (the TaskRecord reference points into the store).
+    previous_assignee = record.assignee_id
+    try:
+        updated = task_store.update_fields(
+            task_id,
+            expected_version=expected,
+            assignee_id=request.to_user_id,
+        )
+    except VersionConflict as vc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "version conflict",
+                "expected_version": vc.expected,
+                "actual_version": vc.actual,
+                "current": {
+                    "task_id": vc.current.id,
+                    "assignee_id": vc.current.assignee_id,
+                    "version": vc.current.version,
+                },
+            },
+        )
+    audit_logger = get_audit_logger_singleton()
+    await audit_logger.log(AuditLogEntry(
+        user_id=user.id,
+        action="task.handoff",
+        resource_id=task_id,
+        resource_type="task",
+        task_id=task_id,
+        tenant_id=user.tenant_id,
+        details={
+            "from_assignee_id": previous_assignee,
+            "to_user_id": updated.assignee_id,
+            "reason": request.reason,
+            "version": updated.version,
+        },
+        outcome="success",
+    ))
+    return HandoffResponse(
+        task_id=updated.id,
+        assignee_id=updated.assignee_id or "",
+        owner_id=updated.owner_id,
+        version=updated.version,
+        from_assignee_id=previous_assignee,
+    )
+
+
 # ---------------------------------------------------------------------------
 # WS /api/ws/{task_id} - WebSocket for real-time progress
 # ---------------------------------------------------------------------------

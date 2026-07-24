@@ -33,6 +33,7 @@ def _rec(
     status: str = "pending",
     version: int = 1,
     assignee_id: str | None = None,
+    metadata: dict | None = None,
 ) -> TaskRecord:
     return TaskRecord(
         id=task_id,
@@ -47,6 +48,7 @@ def _rec(
         visibility=visibility,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
+        metadata=metadata or {},
     )
 
 
@@ -183,3 +185,139 @@ class TestClaimStateAndCAS:
         second = asyncio.run(claim_task("t-1", ClaimRequest(), user=_user("bob")))
         assert second.assignee_id == "bob"
         assert second.version == 3
+
+
+# ─── Handoff ───────────────────────────────────────────────────────────────
+
+from agent_system.api.routes.tasks import HandoffRequest, handoff_task
+
+
+class TestHandoffPermission:
+    def test_owner_can_handoff(self, patched_store):
+        store, audit = patched_store
+        store.save(_rec(owner_id="alice", assignee_id="bob"))
+        resp = asyncio.run(
+            handoff_task(
+                "t-1", HandoffRequest(to_user_id="carol"), user=_user("alice")
+            )
+        )
+        assert resp.assignee_id == "carol"
+        assert resp.from_assignee_id == "bob"
+        assert resp.version == 2
+        assert audit.entries[0].action == "task.handoff"
+
+    def test_current_assignee_can_handoff(self, patched_store):
+        store, _ = patched_store
+        store.save(_rec(owner_id="alice", assignee_id="bob"))
+        resp = asyncio.run(
+            handoff_task(
+                "t-1", HandoffRequest(to_user_id="carol"), user=_user("bob")
+            )
+        )
+        assert resp.assignee_id == "carol"
+
+    def test_platform_admin_can_handoff(self, patched_store):
+        store, _ = patched_store
+        store.save(_rec(owner_id="alice", assignee_id="bob", visibility="private"))
+        resp = asyncio.run(
+            handoff_task(
+                "t-1",
+                HandoffRequest(to_user_id="carol"),
+                user=_user("root", "evilcorp", role="platform_admin"),
+            )
+        )
+        assert resp.assignee_id == "carol"
+
+    def test_random_readonly_user_blocked(self, patched_store):
+        from fastapi import HTTPException
+        store, _ = patched_store
+        # Visibility-shared user — can read but cannot hand off.
+        store.save(_rec(
+            owner_id="alice",
+            visibility="private",
+            metadata={"_shared_with": ["bob"]},
+        ))
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                handoff_task(
+                    "t-1", HandoffRequest(to_user_id="carol"), user=_user("bob")
+                )
+            )
+        assert exc.value.status_code == 403
+
+
+class TestHandoffValidation:
+    def test_empty_to_user_id_rejected(self, patched_store):
+        from fastapi import HTTPException
+        store, _ = patched_store
+        store.save(_rec())
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                handoff_task(
+                    "t-1", HandoffRequest(to_user_id=""), user=_user("alice")
+                )
+            )
+        assert exc.value.status_code == 422
+
+    def test_terminal_task_rejected(self, patched_store):
+        from fastapi import HTTPException
+        store, _ = patched_store
+        store.save(_rec(status="completed"))
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                handoff_task(
+                    "t-1", HandoffRequest(to_user_id="bob"), user=_user("alice")
+                )
+            )
+        assert exc.value.status_code == 422
+
+    def test_same_assignee_rejected(self, patched_store):
+        from fastapi import HTTPException
+        store, _ = patched_store
+        store.save(_rec(assignee_id="bob"))
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                handoff_task(
+                    "t-1", HandoffRequest(to_user_id="bob"), user=_user("alice")
+                )
+            )
+        assert exc.value.status_code == 422
+        assert "already assigned" in exc.value.detail.lower()
+
+    def test_missing_task_404(self, patched_store):
+        from fastapi import HTTPException
+        store, _ = patched_store
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                handoff_task(
+                    "t-1", HandoffRequest(to_user_id="bob"), user=_user("alice")
+                )
+            )
+        assert exc.value.status_code == 404
+
+    def test_version_conflict_409(self, patched_store):
+        from fastapi import HTTPException
+        store, _ = patched_store
+        store.save(_rec(version=5))
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                handoff_task(
+                    "t-1",
+                    HandoffRequest(to_user_id="bob", expected_version=1),
+                    user=_user("alice"),
+                )
+            )
+        assert exc.value.status_code == 409
+        assert exc.value.detail["actual_version"] == 5
+
+    def test_audit_entry_has_reason(self, patched_store):
+        store, audit = patched_store
+        store.save(_rec(owner_id="alice", assignee_id="bob"))
+        asyncio.run(
+            handoff_task(
+                "t-1",
+                HandoffRequest(to_user_id="carol", reason="I am OOO this week"),
+                user=_user("alice"),
+            )
+        )
+        assert audit.entries[0].details.get("reason") == "I am OOO this week"
