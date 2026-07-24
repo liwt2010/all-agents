@@ -3,7 +3,7 @@
 [![CI](https://github.com/liwt2010/all-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/liwt2010/all-agents/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![v0.3.0](https://img.shields.io/badge/release-v0.3.0-blue)](https://github.com/liwt2010/all-agents/releases/tag/v0.3.0)
+[![v0.5.0](https://img.shields.io/badge/release-v0.5.0-blue)](https://github.com/liwt2010/all-agents/releases/tag/v0.5.0)
 
 **Enterprise Multi-Agent Orchestration Platform** — production-grade AI agent system with shared memory, schema tolerance, data provenance, distributed tracing, OpenAPI/SDK auto-generation, end-to-end observability, RS256 JWT auth, Redis-backed rate limiting, PostgreSQL row-level security, WebSocket LLM streaming, GitHub App integration, and a Custom Agent marketplace.
 
@@ -14,11 +14,11 @@ User → CEO Agent → Product Agent → Tech Agent → Test Agent → Deploy Ag
 
 ---
 
-## Current status (v0.3.0)
+## Current status (v0.5.0)
 
-- **1012** tests pass, **5** skipped (WebSocket TestClient framework limitation, documented), **2** xfail (upstream tool bug)
+- **1048** tests pass, **5** skipped (WebSocket TestClient framework limitation, documented), **2** xfail (openapi-python-client upstream bug)
 - **3** known failures in `test_*real_llm.py` — all skip without `ANTHROPIC_API_KEY`; pass in CI with a key
-- Latest tags: `v0.1.0`, `v0.1.1`, `v0.2.0`, `v0.3.0` — see [RELEASE_NOTES.md](RELEASE_NOTES.md)
+- Latest tags: `v0.1.0`, `v0.1.1`, `v0.2.0`, `v0.3.0`, `v0.4.0`, `v0.5.0` — see [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
 ---
 
@@ -71,7 +71,7 @@ docker run -d --name agent-system \
   -e ANTHROPIC_API_KEY=sk-xxx \
   -e REDIS_URL=redis://host:6379 \
   -p 8000:8000 \
-  liwt2010/all-agents:v0.3.0
+  liwt2010/all-agents:v0.5.0
 ```
 
 Generate the RSA keypair once with: `python scripts/gen_rsa_keys.py --kid v1`
