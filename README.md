@@ -3,7 +3,7 @@
 [![CI](https://github.com/liwt2010/all-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/liwt2010/all-agents/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![v0.5.0](https://img.shields.io/badge/release-v0.5.0-blue)](https://github.com/liwt2010/all-agents/releases/tag/v0.5.0)
+[![v0.6.0](https://img.shields.io/badge/release-v0.6.0-blue)](https://github.com/liwt2010/all-agents/releases/tag/v0.6.0)
 
 **Enterprise Multi-Agent Orchestration Platform** — production-grade AI agent system with shared memory, schema tolerance, data provenance, distributed tracing, OpenAPI/SDK auto-generation, end-to-end observability, RS256 JWT auth, Redis-backed rate limiting, PostgreSQL row-level security, WebSocket + gRPC LLM streaming, GitHub App integration, a Custom Agent marketplace, and first-class streaming of tool-call events.
 
@@ -14,11 +14,11 @@ User → CEO Agent → Product Agent → Tech Agent → Test Agent → Deploy Ag
 
 ---
 
-## Current status (v0.5.0)
+## Current status (v0.6.0)
 
-- **1048** tests pass, **5** skipped (WebSocket TestClient framework limitation, documented), **2** xfail (openapi-python-client upstream bug)
+- **1105** tests pass, **5** skipped (WebSocket TestClient framework limitation, documented), **2** xfail (openapi-python-client upstream bug)
 - **3** known failures in `test_*real_llm.py` — all skip without `ANTHROPIC_API_KEY`; pass in CI with a key
-- Latest tags: `v0.1.0`, `v0.1.1`, `v0.2.0`, `v0.3.0`, `v0.4.0`, `v0.5.0` — see [RELEASE_NOTES.md](RELEASE_NOTES.md)
+- Latest tags: `v0.1.0`, `v0.1.1`, `v0.2.0`, `v0.3.0`, `v0.4.0`, `v0.5.0`, `v0.6.0` — see [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
 ---
 
@@ -41,6 +41,7 @@ User → CEO Agent → Product Agent → Tech Agent → Test Agent → Deploy Ag
 | Source-only agents | YAML-defined custom agents per tenant |
 | Hard to extend | OpenAPI/SDK auto-gen + ADR-documented decisions |
 | HTTP-only API | Native gRPC transport (4 RPCs, server-streaming) |
+| "I'll edit it later" | CAS + claim/handoff prevent silent overwrites |
 
 ---
 
@@ -73,7 +74,7 @@ docker run -d --name agent-system \
   -e ANTHROPIC_API_KEY=sk-xxx \
   -e REDIS_URL=redis://host:6379 \
   -p 8000:8000 \
-  liwt2010/all-agents:v0.5.0
+  liwt2010/all-agents:v0.6.0
 ```
 
 Generate the RSA keypair once with: `python scripts/gen_rsa_keys.py --kid v1`
@@ -105,6 +106,27 @@ Access the API:
 ---
 
 ## Production Features
+
+### v0.6.0 — Task collaboration primitives
+
+Multi-user / multi-Agent deployments couldn't safely share tasks — two clients could edit the same row, claim / hand-off didn't exist, and the 6-space visibility model in `ARCHITECTURE.md` §11 was documented but unwired. v0.6.0 turns the §5 / §11 / §14 collaboration design into code.
+
+- **`TaskRecord` gains 4 fields**:
+  - `owner_id` — creator of the task, **immutable** (whitelist enforced in `TaskStore.update_fields`).
+  - `assignee_id` — current owner; flows through `claim` and `handoff`.
+  - `version` — CAS counter, incremented on every `update_fields`.
+  - `visibility` — one of `private` / `perm_group` / `group` / `project` / `external` / `tenant_public` (default `private`, most conservative).
+- **`TaskStore.update_fields(id, expected_version, **fields)`** — compare-and-swap update. Raises `VersionConflict` (carries the current record) on mismatch. Postgres uses `UPDATE ... WHERE id=:id AND version=:ev RETURNING`; InMemory uses dict-level CAS.
+- **3 new REST endpoints**:
+  - `POST /api/tasks/{id}/claim` — set `assignee_id = me`. PRIVATE: only the owner. Other visibilities: any user with read access.
+  - `POST /api/tasks/{id}/handoff` — change `assignee_id`. Body: `{to_user_id, expected_version?, reason?}`. Owner / current assignee / platform_admin only.
+  - `GET /api/tasks/{id}/events` — task-scoped audit timeline (`task.claimed`, `task.handoff`, `task.completed`, …).
+- **`AccessControl` is now wired into task routes** — `_to_user_ctx`, `_record_to_resource`, `_ensure_can_read`. `list_tasks` post-filters in-memory (SQL pushdown is a future TODO).
+- **`AuditLogEntry.task_id` field** — fast task-scoped queries; `/api/audit/query?task_id=` works; legacy entries (`resource_type="task"` + `resource_id`) still match.
+- **Owner attribution on 3 entry points**:
+  - **gRPC `SubmitTask`** — reads `x-user-id` / `x-tenant-id` from `context.invocation_metadata()` (`.proto` unchanged; wire compat preserved). Defaults to `"system"` if absent.
+  - **GitHub webhook** — `TaskContext.metadata.owner_id` = `GITHUB_BOT_USER_ID` env (default `github-bot`); `visibility="project"`; `project_ids=["pr:{repo}"]`.
+  - **Custom Agent `/run`** — `owner_id` = JWT user; audit log on every invocation.
 
 ### v0.5.0 — Native gRPC transport
 
@@ -351,6 +373,9 @@ not just *what* it does.
 | `/api/ws/llm/stream` | WS | JWT (query) | Streaming LLM tokens + tool-call events |
 | `/api/webhooks/github` | POST | HMAC | GitHub App webhook receiver |
 | **gRPC `:50051`** | — | (see GRPC.md) | SubmitTask / GetTask / ListTasks / StreamLLM |
+| `/api/tasks/{id}/claim` | POST | JWT | Claim a task (set assignee_id = me) |
+| `/api/tasks/{id}/handoff` | POST | JWT | Hand off a task to another user |
+| `/api/tasks/{id}/events` | GET | JWT | Task collaboration timeline (audit) |
 | `/metrics` | GET | No | Prometheus scrape endpoint |
 
 Full OpenAPI spec: [/openapi.json](http://localhost:8000/openapi.json)
@@ -530,12 +555,15 @@ pytest tests/test_custom_agent_loader.py -v
 pytest tests/test_grpc_handlers.py -v
 ```
 
-**Current state** (v0.5.0): **1048** tests pass, **5** skipped
+**Current state** (v0.6.0): **1105** tests pass, **5** skipped
 (WebSocket endpoint-level — documented framework limitation),
 **2** xfail (`openapi-python-client` 0.26 upstream UP007 bug),
 **3** known failures in `test_*real_llm.py` (all skip locally
 without `ANTHROPIC_API_KEY`, pass in CI with a key),
-**25** new gRPC handler tests, 0 known regressions.
+**50+** new tests added across the v0.6.0 commits (CAS,
+visibility, claim, handoff, events, audit task_id, gRPC
+metadata owner, webhook + custom-agent attribution). 0 known
+regressions.
 
 ---
 
@@ -563,6 +591,15 @@ Incident response: [docs/RUNBOOK.md](docs/RUNBOOK.md)
 ---
 
 ## Roadmap
+
+### v0.6.0 — delivered ✅
+
+- ✅ **Task collaboration primitives** — `owner_id` / `assignee_id` /
+  `version` / `visibility` on every Task; CAS via `TaskStore.update_fields`;
+  `POST /api/tasks/{id}/claim` / `handoff` / `events` endpoints;
+  AccessControl wired into task routes; `AuditLogEntry.task_id` for
+  task-scoped queries; owner attribution on gRPC / webhook /
+  custom-agent entry points.
 
 ### v0.5.0 — delivered ✅
 
@@ -596,13 +633,13 @@ Incident response: [docs/RUNBOOK.md](docs/RUNBOOK.md)
   spans
 - ✅ **WebSocket streaming LLM** with token-by-token delivery
 
-### Forward-looking (post-v0.5.0)
+### Forward-looking (post-v0.6.0)
 
 - **Multi-tenant Custom Agent marketplace UI** — web frontend for
   browsing/upload of custom agents
 - **HL7 / FHIR adapter** — healthcare data format integration
 - **gRPC interceptors** — auth + rate-limit middleware parity with
-  HTTP layer
+  HTTP layer (currently x-user-id metadata is the only contract)
 - **Distributed task queue** — currently single-process execution;
   add Celery/RQ for high-throughput deployments
 
@@ -614,6 +651,13 @@ MIT — see [LICENSE](LICENSE).
 
 ## Release History
 
+- **v0.6.0** (2026-07-24) — Task collaboration primitives
+  - `TaskRecord` gets `owner_id` / `assignee_id` / `version` / `visibility`
+  - `TaskStore.update_fields` with CAS (raises `VersionConflict` with current record)
+  - 3 new endpoints: `POST /api/tasks/{id}/claim`, `.../handoff`, `GET .../events`
+  - AccessControl wired into task routes (private / shared_with / admin)
+  - `AuditLogEntry.task_id` + `?task_id=` query filter
+  - gRPC / webhook / custom-agent owner attribution
 - **v0.5.0** (2026-07-24) — Native gRPC transport
   - 4 RPCs (`SubmitTask`, `GetTask`, `ListTasks`, `StreamLLM`)
     over `.proto`-driven gRPC; server-streaming for ListTasks +

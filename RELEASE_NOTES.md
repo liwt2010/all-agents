@@ -1,5 +1,117 @@
 # Agent System — Release Notes
 
+## v0.6.0 — 2026-07-24 (Task collaboration primitives)
+
+**Git tag:** `v0.6.0`
+**Scope:** new feature; backward compatible (existing tasks load
+without `owner_id` — backfilled from `user_id`).
+**Commits since v0.5.0:** 10 (`7db0477` + `115aea7` + `318cc14`
++ `0d34ccd` + `515a578` + `8c98b5e` + `fdf5e7b` + `cd8f126` +
+`6dd6cb9` + docs commit).
+
+`ARCHITECTURE.md` §5 / §11 / §14 has described the task
+collaboration design since v15.1 but the code never wired it up.
+v0.6.0 turns that design into production-ready endpoints.
+
+### Added
+
+- **4 new TaskRecord fields** — `owner_id` (immutable creator),
+  `assignee_id` (current owner, mutable), `version` (CAS counter),
+  `visibility` (SpaceVisibility enum value; default `private`).
+- **`TaskStore.update_fields(id, expected_version, **fields)`** —
+  CAS update. Raises `VersionConflict(task_id, expected, actual,
+  current)` so the caller can show the current state instead of
+  silently dropping the conflict. Postgres path uses
+  `UPDATE ... WHERE id=:id AND version=:ev RETURNING *`.
+- **`TaskStore.complete() / fail()`** — CAS wrappers that set
+  status, output / error, completed_at in one round-trip.
+- **`POST /api/tasks/{id}/claim`** — set `assignee_id = me`. PRIVATE
+  tasks: only owner. Other visibilities: any reader. 422 on
+  terminal state. 409 on CAS mismatch with current record in
+  the detail.
+- **`POST /api/tasks/{id}/handoff`** — change `assignee_id`.
+  Owner / current assignee / platform_admin only. Body:
+  `{to_user_id, expected_version?, reason?}`.
+- **`GET /api/tasks/{id}/events`** — task-scoped audit timeline.
+  Backed by `AuditLogEntry.task_id` query filter.
+- **`AccessControl` wired into task routes** — `_to_user_ctx`,
+  `_record_to_resource`, `_ensure_can_read`. `list_tasks`
+  post-filters in memory (SQL pushdown is a future TODO).
+  Rule 2 expanded: `tenant_admin` gets full access within own
+  tenant; `platform_admin` still crosses tenants.
+- **`AuditLogEntry.task_id`** — fast task-scoped queries; legacy
+  `resource_type='task' + resource_id` entries still match.
+- **Owner attribution on 3 entry points**:
+  - **gRPC** — `x-user-id` / `x-tenant-id` metadata on
+    `SubmitTask`. `.proto` unchanged (wire compat).
+  - **GitHub webhook** — `GITHUB_BOT_USER_ID` env (default
+    `github-bot`) as `TaskContext.metadata.owner_id`;
+    `visibility="project"`; `project_ids=["pr:{repo}"]`.
+  - **Custom Agent `/run`** — `owner_id` = JWT user; audit log
+    on every invocation.
+
+### Architecture
+
+```
+                  ┌─────────────────────────────┐
+   gRPC client ──▶│  AgentSystemServiceServicer │ ──▶ GrpcServiceHandler
+                  │  (generated, ~200 KB)       │     (transport-neutral)
+                  └─────────────────────────────┘                  │
+                                                                      │
+                            ┌─────────────────────────────────────┘
+                            ▼
+                  ┌─────────────────────────────┐
+                  │  Same in-process state as    │
+                  │  REST + WebSocket:           │
+                  │   - TaskStore (with CAS)     │
+                  │   - LLMRouter (LLM)          │
+                  └─────────────────────────────┘
+
+   POST /api/tasks        ──▶ TaskStore.save(record w/ owner=user)
+   POST /api/tasks/{id}/claim  ──▶ TaskStore.update_fields(version, assignee=user)
+   POST /api/tasks/{id}/handoff ──▶ TaskStore.update_fields(version, assignee=to)
+   GET  /api/tasks/{id}/events  ──▶ AuditLogEntry.query(task_id=...)
+```
+
+### Migration from v0.5.x
+
+- **Existing task records**: load unchanged. `owner_id` backfills
+  from `user_id`. Visibility defaults to `private`.
+- **gRPC clients**: no wire change. To attribute calls, send
+  `x-user-id` / `x-tenant-id` metadata.
+- **GitHub App users**: set `GITHUB_BOT_USER_ID` if you want a
+  specific bot identity; otherwise defaults to `github-bot`.
+- **Custom Agent consumers**: invocation now writes audit entries
+  (`action="custom_agent.run"`, `outcome=started/success/failure`).
+  If you query `/api/audit/query` you'll see them; existing
+  consumers don't break.
+
+### Known limitations
+
+- **gRPC interceptors** (auth / rate-limit) are not implemented —
+  `x-user-id` metadata is the only contract. Listed as a
+  post-v0.6.0 roadmap item.
+- **`list_tasks` SQL pushdown** — currently post-filters in
+  memory. Will move to a `WHERE` clause once we add a
+  `visibility` index.
+- **gRPC `ListTasks` pagination** — emits one `ListTasksResponse`
+  per row. For large result sets, batch into pages.
+- **Custom Agent ACL** is currently just tenant isolation (the
+  per-agent Resource model isn't wired yet — tracked for v0.7).
+
+### Tests
+
+- **1105 passed / 16 skipped / 0 failed / 2 xfail** (openapi-python-client
+  upstream bug, unchanged from v0.5.0)
+- **50+ new tests** across `test_task_store_cas.py`,
+  `test_tasks_visibility.py`, `test_tasks_claim_handoff.py`,
+  `test_tasks_events.py`, `test_audit_task_id.py`,
+  `test_grpc_metadata_owner.py`, `test_attribution_webhook_custom.py`.
+- **3 real-LLM-gated tests** still skip without
+  `ANTHROPIC_API_KEY` (unchanged).
+
+---
+
 ## v0.5.0 — 2026-07-24 (Native gRPC transport)
 
 **Git tag:** `v0.5.0`

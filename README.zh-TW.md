@@ -3,7 +3,7 @@
 [![CI](https://github.com/liwt2010/all-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/liwt2010/all-agents/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![v0.5.0](https://img.shields.io/badge/release-v0.5.0-blue)](https://github.com/liwt2010/all-agents/releases/tag/v0.5.0)
+[![v0.6.0](https://img.shields.io/badge/release-v0.6.0-blue)](https://github.com/liwt2010/all-agents/releases/tag/v0.6.0)
 
 > **企業級多智能體編排平臺** — 生產級 AI 智能體系統,具備共享記憶、Schema 寬容、資料溯源、分散式追蹤、OpenAPI/SDK 自動生成、端對端可觀測性、原生 gRPC 傳輸、流式工具呼叫事件。
 
@@ -57,7 +57,7 @@ docker run -d --name agent-system \
   -e AUTH_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(48))") \
   -e ANTHROPIC_API_KEY=sk-xxx \
   -p 8000:8000 \
-  liwt2010/all-agents:v0.5.0
+  liwt2010/all-agents:v0.6.0
 ```
 
 存取 API:
@@ -87,6 +87,27 @@ docker run -d --name agent-system \
 ---
 
 ## 生產級特性
+
+### v0.6.0 — Task 協作原語
+
+多使用者 / 多 Agent 部署之前無法安全地共用任務 —— 兩個用戶端可能同時編輯同一行,沒有 claim / hand-off,`ARCHITECTURE.md` §11 的 6-space 可見性模型只停留在文件中。v0.6.0 把 §5 / §11 / §14 的協作設計寫成程式碼。
+
+- **`TaskRecord` 新增 4 個欄位**:
+  - `owner_id` —— 任務建立者,**不可變**(白名單由 `TaskStore.update_fields` 強制)。
+  - `assignee_id` —— 目前負責人,經由 `claim` / `handoff` 流動。
+  - `version` —— CAS 計數器,每次 `update_fields` 自增。
+  - `visibility` —— `private` / `perm_group` / `group` / `project` / `external` / `tenant_public` 之一(預設 `private`,最保守)。
+- **`TaskStore.update_fields(id, expected_version, **fields)`** —— compare-and-swap 更新。版本不符時拋出 `VersionConflict`(附帶目前記錄)。Postgres 用 `UPDATE ... WHERE id=:id AND version=:ev RETURNING`;InMemory 在 dict 層做 CAS。
+- **3 個新 REST 端點**:
+  - `POST /api/tasks/{id}/claim` —— 設定 `assignee_id = me`。PRIVATE:只有 owner。其他可見性:任何具有讀權限的使用者。
+  - `POST /api/tasks/{id}/handoff` —— 修改 `assignee_id`。Body:`{to_user_id, expected_version?, reason?}`。Owner / 目前 assignee / platform_admin 可用。
+  - `GET /api/tasks/{id}/events` —— Task 範圍的稽核時間軸(`task.claimed`、`task.handoff`、`task.completed`、……)。
+- **`AccessControl` 已接入 task 路由** —— `_to_user_ctx`、`_record_to_resource`、`_ensure_can_read`。`list_tasks` 在記憶體中過濾(SQL 下推留 TODO)。
+- **`AuditLogEntry.task_id` 欄位** —— 快速的 task-scoped 查詢;`/api/audit/query?task_id=` 可用;舊項目(`resource_type="task"` + `resource_id`)仍可命中。
+- **3 個入口的歸屬**:
+  - **gRPC `SubmitTask`** —— 自 `context.invocation_metadata()` 讀取 `x-user-id` / `x-tenant-id`(`.proto` 未動,wire 相容)。未提供時預設為 `"system"`。
+  - **GitHub webhook** —— `TaskContext.metadata.owner_id` = `GITHUB_BOT_USER_ID` 環境變數(預設 `github-bot`);`visibility="project"`;`project_ids=["pr:{repo}"]`。
+  - **Custom Agent `/run`** —— `owner_id` = JWT user;每次呼叫寫入稽核紀錄。
 
 ### v0.5.0 — 原生 gRPC 傳輸
 
@@ -174,6 +195,9 @@ AGENT_GRPC_PORT=50052 python -m agent_system.grpc.server
 | `/api/ws/llm/stream` | WS | JWT(query) | 流式 LLM token + 工具呼叫事件 |
 | `/api/webhooks/github` | POST | HMAC | GitHub App webhook 接收器 |
 | **gRPC `:50051`** | — | (見 GRPC.md) | SubmitTask / GetTask / ListTasks / StreamLLM |
+| `/api/tasks/{id}/claim` | POST | JWT | 認領任務(assignee_id = 我) |
+| `/api/tasks/{id}/handoff` | POST | JWT | 把任務轉交給其他使用者 |
+| `/api/tasks/{id}/events` | GET | JWT | 任務協作時間軸(稽核) |
 | `/metrics` | GET | 否 | Prometheus 抓取端點 |
 
 完整 OpenAPI 規範: [/openapi.json](http://localhost:8000/openapi.json)
@@ -289,7 +313,7 @@ ANTHROPIC_API_KEY=sk-xxx pytest tests/test_*real_llm.py -v
 pytest tests/test_production_readiness.py -v
 ```
 
-**當前狀態**:**1048** 測試通過,**5** 跳過,**2** xfail,**3** 個 known failure(需 API key);含 **25** 個新 gRPC handler 測試,0 已知回歸。
+**當前狀態**:**1105** 測試通過,**5** 跳過,**2** xfail,**3** 個 known failure(需 API key);v0.6.0 新增 50+ 測試,0 已知回歸。
 
 ---
 
@@ -351,6 +375,13 @@ MIT — 見 [LICENSE](LICENSE)。
 
 ## 發佈歷史
 
+- **v0.6.0** (2026-07-24) — Task 協作原語
+  - `TaskRecord` 新增 `owner_id` / `assignee_id` / `version` / `visibility`
+  - `TaskStore.update_fields` 帶 CAS(拋出 `VersionConflict` 含當前記錄)
+  - 3 個新端點:`POST /api/tasks/{id}/claim`、`.../handoff`、`GET .../events`
+  - AccessControl 接入 task 路由(private / shared_with / admin)
+  - `AuditLogEntry.task_id` + `?task_id=` 查詢過濾
+  - gRPC / webhook / custom-agent 歸屬
 - **v0.5.0** (2026-07-24) — 原生 gRPC 傳輸 — 4 個 RPC(`SubmitTask` / `GetTask` / `ListTasks` / `StreamLLM`),ListTasks 與 StreamLLM 為 server-streaming;`.proto` 為單一真相源;含 25 個新測試與真實 channel 端到端驗證
 - **v0.4.0** (2026-07-22) — 流式工具呼叫事件 — `LLMRouter.stream_events()` 將 `tool_start` / `tool_input` / `tool_end` / `tool_result` 提升為一級事件(Anthropic + OpenAI);WS 端點橋接為 JSON 框,舊 `chunk` 事件保留;含 9 個新測試並修復 `estimate_cost` 參數順序 bug
 - **v0.3.0** (2026-07-22) — 自訂 Agent 市場 + GitHub App
@@ -360,9 +391,9 @@ MIT — 見 [LICENSE](LICENSE)。
 
 完整內容見 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-## 當前狀態 (v0.5.0)
+## 當前狀態 (v0.6.0)
 
-- **1048** 測試通過,**5** 跳過(WebSocket TestClient 框架限制),**2** xfail
-- **25** 個新 gRPC handler 測試
+- **1105** 測試通過,**5** 跳過(WebSocket TestClient 框架限制),**2** xfail
+- v0.6.0 新增 50+ 測試(CAS、可見性、claim、handoff、events、audit task_id、gRPC metadata owner、webhook + custom-agent 歸屬)
 - **3** 個 known failure 在 test_*real_llm.py — 無 ANTHROPIC_API_KEY 時跳過
 - 詳細測試統計與歷史回歸趨勢見 [STATUS.md](STATUS.md)

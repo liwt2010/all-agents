@@ -29,6 +29,61 @@ of each release.
 
 ---
 
+## [0.6.0] — 2026-07-24 (Task collaboration primitives)
+
+### Added
+- **TaskRecord collaboration fields**: `owner_id` (immutable creator),
+  `assignee_id` (mutable, flows through claim/handoff), `version`
+  (CAS counter), `visibility` (one of `private` / `perm_group` /
+  `group` / `project` / `external` / `tenant_public`; default
+  `private`). Plus `created_at` / `updated_at` timestamps.
+- **TaskStore CAS**: `update_fields(id, expected_version, **fields)`
+  — compare-and-swap update; raises `VersionConflict` (carries the
+  current record) on mismatch. Postgres impl uses `UPDATE ...
+  WHERE id=:id AND version=:ev RETURNING *`. Plus
+  `complete()` / `fail()` thin wrappers. Whitelist of mutable
+  fields — `owner_id` is intentionally immutable.
+- **REST endpoints**:
+  - `POST /api/tasks/{id}/claim` — set `assignee_id = me`. PRIVATE:
+    owner only. Other visibilities: any reader.
+  - `POST /api/tasks/{id}/handoff` — change `assignee_id`. Owner /
+    current assignee / platform_admin only.
+  - `GET /api/tasks/{id}/events` — task-scoped audit timeline
+    (claims / handoffs / completed / failed).
+- **AccessControl wired into task routes**: `_to_user_ctx`,
+  `_record_to_resource`, `_ensure_can_read`. `list_tasks`
+  post-filters in-memory. Tenant-admin now covered (not just
+  platform-admin). ACL rule 2 expanded: `tenant_admin` gets
+  full access within own tenant.
+- **`AuditLogEntry.task_id` field** — fast task-scoped queries.
+  `/api/audit/query?task_id=` works end-to-end. Legacy entries
+  (resource_type='task' + resource_id) still match.
+- **Owner attribution on 3 entry points**:
+  - **gRPC** — `SubmitTask` reads `x-user-id` / `x-tenant-id`
+    from `context.invocation_metadata()` (`.proto` unchanged).
+    Default `"system"` if absent.
+  - **GitHub webhook** — `TaskContext.metadata.owner_id` =
+    `GITHUB_BOT_USER_ID` env (default `github-bot`);
+    `visibility="project"`; `project_ids=["pr:{repo}"]`.
+  - **Custom Agent `/run`** — `owner_id` = JWT user; audit log
+    on every invocation (started / success / failure).
+
+### Fixed
+- **gRPC servicer + handler**: stopped calling the non-existent
+  `task_store.create()`; switched to `task_store.save(TaskRecord)`
+  with proper CAS. `_task_row_to_dict` now accepts both
+  Pydantic TaskRecord and dict rows.
+- **`github_webhook` missing `import os`** — read env vars
+  (`GITHUB_BOT_USER_ID`).
+
+### Migration
+- Old task records without `owner_id` still load — `_record_to_resource`
+  falls back to `user_id`. New REST endpoints require
+  `expected_version` for CAS conflict detection; omit the field
+  to use the current version automatically.
+
+---
+
 ## [0.5.0] — 2026-07-24 (Native gRPC transport)
 
 ### Added

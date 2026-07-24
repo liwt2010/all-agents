@@ -440,6 +440,12 @@ Agent 下次执行     →  加载相关经验
 
 ## 第 5 章 智能升级机制详解（4 选 1，决策级别重构）
 
+> **v0.6.0 — implemented at Task layer**: claim / handoff /
+> events endpoints wire the resolver's owner / assignee / version
+> semantics into `TaskStore.update_fields` with CAS. See
+> [`CHANGELOG.md`](../CHANGELOG.md) § 0.6.0 and
+> [`api/routes/tasks.py`](../src/agent_system/api/routes/tasks.py).
+
 ### 5.1 为什么这个最重要
 
 **核心原则**：**人 > CEO Agent > 子 Agent**
@@ -835,6 +841,12 @@ query("""
 
 ## 第 11 章 上下文隔离
 
+> **v0.6.0 — implemented at Task layer**: the 6-space `Resource` /
+> `UserContext` model is now wired into `api/routes/tasks.py` via
+> `_to_user_ctx` / `_record_to_resource` / `_ensure_can_read`.
+> `list_tasks` post-filters in memory; SQL pushdown is a future
+> TODO. See `core/access_control.py`.
+
 ### 11.1 6 种空间
 
 ```
@@ -925,6 +937,14 @@ class TaskCheckpoint:
 ---
 
 ## 第 14 章 协作冲突
+
+> **v0.6.0 — implemented at Task layer**: the optimistic-lock /
+> version-conflict pattern described below is the contract behind
+> `TaskStore.update_fields(expected_version=...)`. `VersionConflict`
+> is raised on mismatch and carries the current record so callers
+> can show the actual state. Concurrency primitives (Redis-backed
+> `lock`, priority queues, deadline scheduling) remain in the
+> storage layer where they belong.
 
 ### 14.1 4 类冲突
 

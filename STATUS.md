@@ -1,8 +1,8 @@
 # Agent System — Status Report
 
-> **Last updated:** 2026-07-24 (post v0.5.0 release)
-> **Latest tag:** `v0.5.0`
-> **Status:** 🟢 **Production-grade**, multi-replica safe, RS256-authenticated, gRPC-enabled
+> **Last updated:** 2026-07-24 (post v0.6.0 release)
+> **Latest tag:** `v0.6.0`
+> **Status:** 🟢 **Production-grade**, multi-replica safe, RS256-authenticated, gRPC-enabled, collaboration-aware
 
 This document tracks the actual current state of the Agent System
 platform. The previous iteration-plan STATUS.md (dated 2026-06-30)
@@ -13,9 +13,9 @@ and test results.
 
 ## Executive Summary
 
-Agent System v0.5.0 is a **production-grade, multi-replica-safe**
+Agent System v0.6.0 is a **production-grade, multi-replica-safe**
 multi-agent orchestration platform. All v0.2.0 + v0.3.0 + v0.4.0 +
-v0.5.0 roadmap items are delivered (see [CHANGELOG.md](CHANGELOG.md)
+v0.5.0 + v0.6.0 roadmap items are delivered (see [CHANGELOG.md](CHANGELOG.md)
 for the full PR list). The platform is verified end-to-end with
 real LLM API calls, ships a full CI/CD gate, observability stack,
 and operational runbook, and documents all major architectural
@@ -23,22 +23,23 @@ decisions in [`docs/adr/`](docs/adr/).
 
 | Metric | Value |
 |---|---|
-| Source files (src/) | ~90 |
-| Source LOC (Python) | ~27,000 |
+| Source files (src/) | ~95 |
+| Source LOC (Python) | ~28,000 |
 | Built-in agents | **9** (Product, Tech, Test, Deploy, CEO, Security, Docs, Review, DevOps) |
-| Test files | 80+ |
-| Tests collected | **1048** passed + 5 skipped + 2 xfail + 3 known-fail (real-LLM gated) |
-| Skipped | 5 (WebSocket TestClient framework limitation — documented) |
+| Test files | 90+ |
+| Tests collected | **1105** passed + 16 skipped + 2 xfail + 3 known-fail (real-LLM gated) |
+| Skipped | 16 (15 WebSocket TestClient framework + 1 misc; documented) |
 | xfail | 2 (`openapi-python-client` 0.26 upstream UP007 bug) |
 | Known failures (real-LLM gated) | 3 — pass in CI when `ANTHROPIC_API_KEY` is set |
 | Production-grade hardening | CORS, TLS, RS256 JWT, JWT rotation, rate limit (in-memory + Redis), audit, backup |
 | Multi-replica support | ✅ Redis rate limit, PostgreSQL RLS, OpenTelemetry per-route spans |
-| Transports | REST + WebSocket + **gRPC** (v0.5.0) |
+| Transports | REST + WebSocket + gRPC (v0.5.0) |
+| Task collaboration | ✅ owner/version/visibility + claim/handoff/events (v0.6.0) |
 | GitHub App integration | ✅ Webhook receiver + auto PR review dispatch (v0.3.0) |
 | Custom Agent marketplace | ✅ YAML-defined agents per tenant (v0.3.0) |
 | Streaming tool-call events | ✅ `LLMRouter.stream_events()` (v0.4.0) |
 | CI workflow | 2 jobs + manual dispatch (real-LLM smoke) |
-| Docker image | `liwt2010/all-agents:v0.5.0` |
+| Docker image | `liwt2010/all-agents:v0.6.0` |
 | Architecture decisions | [`docs/adr/`](docs/adr/) (4 ADRs + index) |
 
 ---
@@ -66,7 +67,7 @@ The 2026-06-30 STATUS.md listed several gaps. All have been closed:
 
 ---
 
-## v0.2.0 / v0.3.0 Roadmap Items — DONE
+## v0.2.0 / v0.3.0 / v0.4.0 / v0.5.0 / v0.6.0 Roadmap Items — DONE
 
 | v0.2.0 Item | Status | Implementation | Tests |
 |---|---|---|---|
@@ -209,10 +210,10 @@ Verified: `tests/test_storage.py`, `tests/test_backup.py`, `tests/test_redis_bac
 
 | Category | Count | Notes |
 |---|---|---|
-| Unit tests (CI subset) | **1048 passed** + 5 skipped + 2 xfail | Filter: `--ignore=tests/test_*real_llm.py` |
+| Unit tests (CI subset) | **1105 passed** + 16 skipped + 2 xfail | Filter: `--ignore=tests/test_*real_llm.py` |
 | Real-LLM E2E tests | 1 collected | Requires `ANTHROPIC_API_KEY`; skipped locally without key |
 | Production-readiness gate | 42 | Static checks on artifacts |
-| **Full sweep collected** | **1058** | 1048 passed + 5 skipped + 2 xfail + 3 real-LLM skip-without-key |
+| **Full sweep collected** | **1123** | 1105 passed + 16 skipped + 2 xfail + 3 real-LLM skip-without-key |
 
 ### Real-LLM Test Suite (9 tests, ~6 minutes total)
 
@@ -268,7 +269,7 @@ pip install -e ".[api,storage]"
 
 # Run unit tests (no key needed)
 pytest tests/ -q --ignore=tests/test_*real_llm.py
-# Expected: 1058 collected (1048 passed + 5 skipped + 2 xfail + 3 real-LLM skip-without-key), 42 production-readiness passed
+# Expected: 1123 collected (1105 passed + 16 skipped + 2 xfail + 3 real-LLM skip-without-key), 42 production-readiness passed
 
 # Run production-readiness gate
 pytest tests/test_production_readiness.py -v
