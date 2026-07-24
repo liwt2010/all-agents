@@ -78,8 +78,59 @@ class TaskStore:
     def delete(self, task_id: str) -> bool:
         raise NotImplementedError
 
+    def update_fields(
+        self,
+        task_id: str,
+        expected_version: int,
+        **fields: Any,
+    ) -> TaskRecord:
+        """CAS update. Increments `version`, sets `updated_at`.
+
+        Raises:
+            KeyError: task not found.
+            VersionConflict: expected_version doesn't match current.
+        """
+        raise NotImplementedError
+
+    def complete(
+        self,
+        task_id: str,
+        expected_version: int,
+        output: dict[str, Any],
+    ) -> TaskRecord:
+        """CAS-complete. Sets status='completed' + completed_at + output."""
+        raise NotImplementedError
+
+    def fail(
+        self,
+        task_id: str,
+        expected_version: int,
+        error: str,
+    ) -> TaskRecord:
+        """CAS-fail. Sets status='failed' + completed_at + error."""
+        raise NotImplementedError
+
     def close(self) -> None:
         pass
+
+
+class VersionConflict(Exception):
+    """Raised when expected_version doesn't match the stored record.
+
+    Carries the actual record so the caller can show the current state
+    (e.g. "task is now owned by X, version is now Y") instead of
+    silently dropping the conflict.
+    """
+
+    def __init__(self, task_id: str, expected: int, actual: int, current: TaskRecord):
+        self.task_id = task_id
+        self.expected = expected
+        self.actual = actual
+        self.current = current
+        super().__init__(
+            f"version conflict on task {task_id}: "
+            f"expected {expected}, got {actual}"
+        )
 
 
 # ── In-memory implementation (default) ──
@@ -113,6 +164,61 @@ class InMemoryTaskStore(TaskStore):
             return True
         return False
 
+    def update_fields(
+        self,
+        task_id: str,
+        expected_version: int,
+        **fields: Any,
+    ) -> TaskRecord:
+        rec = self._store.get(task_id)
+        if rec is None:
+            raise KeyError(task_id)
+        if rec.version != expected_version:
+            raise VersionConflict(task_id, expected_version, rec.version, rec)
+        # Allowed fields — guard against typos / write attempts to read-only.
+        allowed = {
+            "status", "output", "error", "started_at", "completed_at",
+            "metadata", "assignee_id", "visibility", "user_id",
+        }
+        bad = set(fields) - allowed
+        if bad:
+            raise ValueError(f"cannot update fields: {sorted(bad)}")
+        for k, v in fields.items():
+            setattr(rec, k, v)
+        rec.version += 1
+        rec.updated_at = datetime.now(timezone.utc)
+        return rec
+
+    def complete(
+        self,
+        task_id: str,
+        expected_version: int,
+        output: dict[str, Any],
+    ) -> TaskRecord:
+        now = datetime.now(timezone.utc)
+        return self.update_fields(
+            task_id,
+            expected_version,
+            status="completed",
+            output=output,
+            completed_at=now,
+        )
+
+    def fail(
+        self,
+        task_id: str,
+        expected_version: int,
+        error: str,
+    ) -> TaskRecord:
+        now = datetime.now(timezone.utc)
+        return self.update_fields(
+            task_id,
+            expected_version,
+            status="failed",
+            error=error,
+            completed_at=now,
+        )
+
 
 # ── Postgres implementation ──
 
@@ -124,14 +230,29 @@ class PostgresTaskStore(TaskStore):
     or if connection fails.
     """
 
+    # Idempotent ALTER TABLE for v0.6.0 — collaboration primitives
+    # (owner_id / assignee_id / version / visibility / timestamps).
+    # Safe to re-run on every connection (IF NOT EXISTS is a no-op when
+    # the column already exists).
+    V060_MIGRATION_SQL = """
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS owner_id TEXT NOT NULL DEFAULT '';
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assignee_id TEXT;
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private';
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+    ALTER TABLE tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+    CREATE INDEX IF NOT EXISTS idx_tasks_owner_id ON tasks(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_assignee_id ON tasks(assignee_id);
+    """
+
     def __init__(self, url: str, fallback: TaskStore | None = None):
         try:
-            from sqlalchemy import create_engine, Column, String, DateTime, JSON, Text
+            from sqlalchemy import create_engine, Column, String, DateTime, JSON, Integer, Text
             from sqlalchemy.orm import declarative_base, sessionmaker
         except ImportError:
             raise ImportError("PostgresTaskStore requires sqlalchemy. Run: pip install sqlalchemy")
 
-        self._sa = __import__("sqlalchemy", fromlist=["create_engine", "Column", "String", "DateTime", "JSON", "Text", "declarative_base", "sessionmaker"])
+        self._sa = __import__("sqlalchemy", fromlist=["create_engine", "Column", "String", "DateTime", "JSON", "Integer", "Text", "declarative_base", "sessionmaker"])
         try:
             self._engine = create_engine(url, pool_pre_ping=False, future=True)
             # Test connection early so bad URLs are caught here
@@ -173,6 +294,11 @@ class PostgresTaskStore(TaskStore):
 
         try:
             Base.metadata.create_all(self._engine)
+            with self._engine.begin() as conn:
+                for stmt in self.V060_MIGRATION_SQL.strip().split(";"):
+                    stmt = stmt.strip()
+                    if stmt:
+                        conn.execute(self._sa.__import__("sqlalchemy").text(stmt))
             logger.info(f"PostgresTaskStore connected: {url.split('@')[-1] if '@' in url else url}")
         except Exception as e:
             logger.warning(f"Postgres connection failed ({e}); using fallback")
@@ -243,6 +369,85 @@ class PostgresTaskStore(TaskStore):
             session.delete(row)
             session.commit()
             return True
+
+    def update_fields(
+        self,
+        task_id: str,
+        expected_version: int,
+        **fields: Any,
+    ) -> TaskRecord:
+        if self._engine is None:
+            return self._fallback.update_fields(
+                task_id, expected_version, **fields
+            )
+        # Whitelist of mutable fields — same set as InMemory.
+        allowed = {
+            "status", "output", "error", "started_at", "completed_at",
+            "metadata", "assignee_id", "visibility", "user_id",
+        }
+        bad = set(fields) - allowed
+        if bad:
+            raise ValueError(f"cannot update fields: {sorted(bad)}")
+        # Build SET clause from the whitelist-filtered fields plus
+        # version bump + updated_at. RETURNING gives us the row in
+        # one round-trip; rowcount tells us if CAS succeeded.
+        set_parts = ["version = version + 1", "updated_at = now()"]
+        params: dict[str, Any] = {"id": task_id, "ev": expected_version}
+        for k, v in fields.items():
+            # SQLAlchemy parameter names can't include trailing
+            # underscores reliably; use a key-safe mapping.
+            ph = f"f_{k}"
+            set_parts.append(f"{k} = :{ph}")
+            params[ph] = v
+        sql = (
+            f"UPDATE tasks SET {', '.join(set_parts)} "
+            "WHERE id = :id AND version = :ev "
+            "RETURNING *"
+        )
+        with self._SessionLocal() as session:
+            res = session.execute(self._sa.__import__("sqlalchemy").text(sql), params)
+            row = res.first()
+            session.commit()
+            if row is None:
+                # Either task not found OR version mismatch — distinguish.
+                cur = session.get(self._TaskRow, task_id)
+                if cur is None:
+                    raise KeyError(task_id)
+                raise VersionConflict(
+                    task_id, expected_version, cur.version, self._row_to_record(cur)
+                )
+            # RETURNING gives us the column names directly; map by name.
+            return self._row_to_record(row)
+
+    def complete(
+        self,
+        task_id: str,
+        expected_version: int,
+        output: dict[str, Any],
+    ) -> TaskRecord:
+        now = datetime.now(timezone.utc)
+        return self.update_fields(
+            task_id,
+            expected_version,
+            status="completed",
+            output=output,
+            completed_at=now,
+        )
+
+    def fail(
+        self,
+        task_id: str,
+        expected_version: int,
+        error: str,
+    ) -> TaskRecord:
+        now = datetime.now(timezone.utc)
+        return self.update_fields(
+            task_id,
+            expected_version,
+            status="failed",
+            error=error,
+            completed_at=now,
+        )
 
     def close(self) -> None:
         if self._engine is not None:
