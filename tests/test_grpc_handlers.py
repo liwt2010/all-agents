@@ -23,71 +23,16 @@ from agent_system.grpc.handlers import (
     aiter_stream_llm_events,
 )
 from agent_system.core.llm_router import LLMUsage, StreamEvent
+from agent_system.storage.task_store import InMemoryTaskStore
 
 
 # ── Fixtures ──
 
 
-class FakeTaskStore:
-    """Minimal TaskStore fake for handler tests."""
-
-    def __init__(self):
-        self._rows: dict[str, dict] = {}
-        self._next_id = 0
-
-    def create(self, tenant_id, agent, input_text, metadata):
-        self._next_id += 1
-        row = {
-            "id": f"t-{self._next_id}",
-            "tenant_id": tenant_id,
-            "agent": agent,
-            "input": input_text,
-            "status": "pending",
-            "output": None,
-            "error": "",
-            "metadata": dict(metadata or {}),
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
-            "input_tokens": 0,
-            "output_tokens": 0,
-        }
-        self._rows[row["id"]] = row
-        return row
-
-    def get(self, task_id, tenant_id):
-        row = self._rows.get(task_id)
-        if row is None or row["tenant_id"] != tenant_id:
-            return None
-        return row
-
-    def list(self, tenant_id, status=None, limit=50, cursor=None):
-        rows = [
-            r for r in self._rows.values()
-            if r["tenant_id"] == tenant_id
-            and (status is None or r["status"] == status)
-        ]
-        return {"rows": rows[:limit], "next_cursor": ""}
-
-    def complete(self, task_id, tenant_id, output_text):
-        row = self.get(task_id, tenant_id)
-        if row is None:
-            return
-        row["output"] = {"text": output_text}
-        row["status"] = "completed"
-        row["updated_at"] = datetime.now(timezone.utc)
-
-    def fail(self, task_id, tenant_id, error):
-        row = self.get(task_id, tenant_id)
-        if row is None:
-            return
-        row["error"] = error
-        row["status"] = "failed"
-        row["updated_at"] = datetime.now(timezone.utc)
-
-
 @pytest.fixture
 def fake_task_store():
-    return FakeTaskStore()
+    """Real InMemoryTaskStore — matches the v0.6.0 TaskStore contract."""
+    return InMemoryTaskStore()
 
 
 def _make_stream_event(kind, **kwargs):
@@ -154,7 +99,7 @@ class TestTaskLifecycle:
             "tenant_id": "acme",
             "metadata": {"team": "core"},
         })
-        assert result["id"].startswith("t-")
+        assert result["id"].startswith("grpc-")
         assert result["status"] == 1  # PENDING
         assert result["input"] == "Build a TODO app"
         assert result["agent"] == "product"
@@ -268,7 +213,7 @@ class TestStreamLLM:
             raise RuntimeError("upstream down")
 
         deps = {
-            "task_store": FakeTaskStore(),
+            "task_store": InMemoryTaskStore(),
             "llm_router": MagicMock(stream_events=MagicMock(return_value=_bad_stream())),
         }
         h = GrpcServiceHandler(deps)
@@ -302,7 +247,7 @@ class TestStreamLLM:
     async def test_stream_uses_config_getter_when_no_model(self):
         cfg_getter = MagicMock(return_value=SimpleNamespace(model="custom-model"))
         deps = {
-            "task_store": FakeTaskStore(),
+            "task_store": InMemoryTaskStore(),
             "llm_router": MagicMock(stream_events=MagicMock(return_value=_make_async_gen())),
             "config_getter": cfg_getter,
         }

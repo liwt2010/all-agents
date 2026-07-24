@@ -58,11 +58,19 @@ def _build_patches() -> tuple:
 
         def SubmitTask(self, request, context):
             import asyncio
+            # v0.6.0: read owner attribution from gRPC metadata. The
+            # .proto is unchanged (wire compat); we pull x-user-id and
+            # x-tenant-id from the call's invocation_metadata(). Default
+            # to "system" if the caller doesn't supply them.
+            md = dict(context.invocation_metadata() or ())
+            user_id = md.get("x-user-id") or "system"
+            tenant_id_meta = md.get("x-tenant-id")
             req = {
                 "input": request.input,
                 "agent": request.agent,
-                "tenant_id": request.tenant_id,
+                "tenant_id": tenant_id_meta or request.tenant_id or "default",
                 "metadata": _struct_to_dict(request.metadata),
+                "user_id": user_id,
             }
             row = asyncio.run(self._h.submit_task(req))
             return _dict_to_task_message(row, agent_system_pb2)

@@ -143,28 +143,52 @@ class GrpcServiceHandler:
 
     async def submit_task(self, request: dict[str, Any]) -> dict[str, Any]:
         """Submit a task. Returns the Task dict with status=PENDING."""
+        from datetime import datetime, timezone
+        from agent_system.storage.task_store import TaskRecord
+        import uuid as _uuid
+
         tenant_id = request.get("tenant_id", "default")
         agent = request.get("agent", "product")
         inp = request.get("input", "")
-        metadata = request.get("metadata", {})
+        metadata = dict(request.get("metadata", {}) or {})
+        # v0.6.0: owner attribution. Either the caller (gRPC metadata
+        # x-user-id) or a configured bot identity, or fall back to
+        # "system" if neither is set.
+        user_id = request.get("user_id") or "system"
 
         # Persist a Task row via the same TaskStore the REST API uses.
-        task = self._task_store.create(
-            tenant_id=tenant_id,
+        # Use save() with a TaskRecord rather than the (non-existent)
+        # .create() helper, so we can set owner_id / version / etc.
+        now = datetime.now(timezone.utc)
+        task_id = f"grpc-{_uuid.uuid4().hex[:12]}"
+        record = TaskRecord(
+            id=task_id,
             agent=agent,
-            input_text=inp,
-            metadata=dict(metadata or {}),
+            input=inp,
+            status="pending",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            metadata=metadata,
+            owner_id=user_id,            # v0.6.0
+            assignee_id=None,            # v0.6.0
+            version=1,                   # v0.6.0
+            visibility="private",        # v0.6.0
+            created_at=now,
+            updated_at=now,
         )
+        self._task_store.save(record)
 
         # Fire-and-forget background execution. Errors surface via
         # the task row (status=FAILED, error=...) so the caller
         # can poll GetTask.
         asyncio.create_task(
-            self._run_task(task["id"], tenant_id, agent, inp, metadata)
+            self._run_task(task_id, tenant_id, agent, inp, metadata, user_id)
         )
-        return self._task_row_to_dict(task)
+        return self._task_row_to_dict(record)
 
-    async def _run_task(self, task_id, tenant_id, agent, input_text, metadata):
+    async def _run_task(
+        self, task_id, tenant_id, agent, input_text, metadata, user_id,
+    ):
         """Background task execution. Mirrors the REST tasks.py handler."""
         from agent_system.core.llm_router import LLMConfig  # local import to avoid cycle
         from agent_system.core.agent import TaskContext
@@ -176,12 +200,28 @@ class GrpcServiceHandler:
             text, _usage = await self._llm_router.call_llm(
                 cfg, system, messages, tools=None,
             )
-            self._task_store.complete(
-                task_id=task_id, tenant_id=tenant_id, output_text=text,
-            )
+            # Use the v0.6.0 CAS complete(): set status=completed +
+            # output. CAS guards against concurrent updates from the
+            # REST layer if the same task is also driven via HTTP.
+            current = self._task_store.get(task_id)
+            if current is not None:
+                self._task_store.complete(
+                    task_id=task_id,
+                    expected_version=current.version,
+                    output={"text": text},
+                )
         except Exception as e:
             logger.warning(f"gRPC task {task_id} failed: {e}")
-            self._task_store.fail(task_id=task_id, tenant_id=tenant_id, error=str(e))
+            current = self._task_store.get(task_id)
+            if current is not None:
+                try:
+                    self._task_store.fail(
+                        task_id=task_id,
+                        expected_version=current.version,
+                        error=str(e),
+                    )
+                except Exception as inner:
+                    logger.warning(f"gRPC fail() also failed: {inner}")
 
     # ── GetTask ──
 
@@ -189,8 +229,14 @@ class GrpcServiceHandler:
         """Return the task or None if not found / wrong tenant."""
         tenant_id = request.get("tenant_id", "default")
         task_id = request.get("id", "")
-        row = self._task_store.get(task_id, tenant_id=tenant_id)
-        return self._task_row_to_dict(row) if row else None
+        row = self._task_store.get(task_id)
+        if row is None:
+            return None
+        # Tenant filter at the handler boundary — ACL isn't part of
+        # the gRPC contract yet (no auth interceptor in v0.6.0).
+        if row.tenant_id != tenant_id:
+            return None
+        return self._task_row_to_dict(row)
 
     # ── ListTasks ──
 
@@ -208,16 +254,13 @@ class GrpcServiceHandler:
         cursor = request.get("cursor", "") or None
 
         page = self._task_store.list(
-            tenant_id=tenant_id, status=status or None, limit=limit, cursor=cursor,
+            tenant_id=tenant_id, status=status or None, limit=limit,
         )
-        # Yield a single response per page. The gRPC client sees
-        # these as a stream and can stop early (e.g. UI showing only
-        # the first N). For our TaskStore (SQLite) the whole result
-        # set usually fits in one page; for PostgreSQL this naturally
-        # paginates.
+        # Real TaskStore.list returns list[TaskRecord]. Wrap it in the
+        # {rows, next_cursor} shape the gRPC servicer consumes.
         yield {
-            "tasks": [self._task_row_to_dict(r) for r in page["rows"]],
-            "next_cursor": page.get("next_cursor", "") or "",
+            "tasks": [self._task_row_to_dict(r) for r in page],
+            "next_cursor": "",
         }
 
     # ── StreamLLM ──
@@ -248,39 +291,52 @@ class GrpcServiceHandler:
     # ── helpers ──
 
     @staticmethod
-    def _task_row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
-        """Translate a TaskStore row into the wire dict the servicer emits.
+    def _task_row_to_dict(row) -> dict[str, Any]:
+        """Translate a TaskStore row (TaskRecord or dict) into the wire
+        dict the servicer emits. Mirrors the REST `_task_to_response`
+        shape so cross-transport clients see consistent payloads.
 
-        Mirrors `agent_system.api.routes.tasks._task_to_response` —
-        kept independent so the gRPC and REST shapes can diverge
-        independently if needed (e.g. gRPC can add internal fields
-        that REST hides).
+        v0.6.0: accepts both Pydantic TaskRecord (the v0.6.0 contract)
+        and plain dicts (legacy / test fixtures), via the `_g` helper.
         """
         if row is None:
             return {}
+
+        def _g(key: str, default=None):
+            if hasattr(row, key):
+                return getattr(row, key)
+            try:
+                return row[key]
+            except (KeyError, TypeError):
+                return default
+
+        status_str = str(_g("status", "") or "").lower()
         status_int = {
             "pending": 1, "running": 2, "completed": 3,
             "failed": 4, "cancelled": 5,
-        }.get(str(row.get("status", "")).lower(), 0)
+        }.get(status_str, 0)
+        output = _g("output")
         output_json = ""
-        if row.get("output"):
+        if output:
             try:
-                output_json = json.dumps(row["output"], default=str)
+                output_json = json.dumps(output, default=str)
             except TypeError:
-                output_json = str(row["output"])
-        # created_at / updated_at as ISO 8601 strings — the gRPC
-        # servicer will map these to google.protobuf.Timestamp.
+                output_json = str(output)
         return {
-            "id": row.get("id", ""),
+            "id": _g("id", ""),
             "status": status_int,
-            "input": row.get("input", "") or "",
-            "agent": row.get("agent", "") or "",
+            "input": _g("input", "") or "",
+            "agent": _g("agent", "") or "",
             "output_json": output_json,
-            "error": row.get("error", "") or "",
-            "created_at": _iso(row.get("created_at")),
-            "updated_at": _iso(row.get("updated_at")),
-            "input_tokens": int(row.get("input_tokens", 0) or 0),
-            "output_tokens": int(row.get("output_tokens", 0) or 0),
+            "error": _g("error", "") or "",
+            "created_at": _iso(_g("created_at")),
+            "updated_at": _iso(_g("updated_at")),
+            "input_tokens": int(_g("input_tokens", 0) or 0),
+            "output_tokens": int(_g("output_tokens", 0) or 0),
+            "owner_id": _g("owner_id", "") or "",
+            "assignee_id": _g("assignee_id"),
+            "version": int(_g("version", 1) or 1),
+            "visibility": _g("visibility", "private") or "private",
         }
 
 
