@@ -14,8 +14,10 @@ find your role below and follow the link.
 
 ## For deployers / operators
 
-- [PRODUCTION.md](PRODUCTION.md) — 13-section deployment guide.
-  Audience: anyone running this in production.
+- [PRODUCTION.md](PRODUCTION.md) — 15-section deployment guide.
+  Audience: anyone running this in production. Covers v0.6.0 features
+  (RS256, Postgres RLS, WebSocket, gRPC, GitHub App, Task
+  collaboration, Postgres migrations).
 - [RUNBOOK.md](RUNBOOK.md) — incident response. Audience: on-call
   engineer. Cross-linked from PRODUCTION.md §11.
 

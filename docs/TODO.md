@@ -1,7 +1,7 @@
 # TODO — Forward-looking roadmap
 
-> This document tracks **post-v0.3.0 work**. All v0.1.0, v0.1.1, v0.2.0,
-> and v0.3.0 roadmap items are complete; see [CHANGELOG.md](../CHANGELOG.md)
+> This document tracks **post-v0.6.0 work**. All v0.1.0 through
+> v0.6.0 roadmap items are complete; see [CHANGELOG.md](../CHANGELOG.md)
 > and [RELEASE_NOTES.md](../RELEASE_NOTES.md) for what shipped.
 
 ## Backlog (unprioritized)
@@ -25,15 +25,11 @@
 
 ## Known technical debt
 
-- **`docs/PRODUCTION.md`** is 19KB and partially out of sync with
-  v0.2.0 / v0.3.0 features (RS256 section, RLS, WebSocket, GitHub
-  webhook all need updates beyond what the README summary covers).
 - **`ARCHITECTURE.md`** (51KB) was last edited before v0.1.0; it
-  pre-dates the v0.2.0 / v0.3.0 modules (rate_limit/backend.py,
-  memory/storage/postgres_backend.py RLS, api/routes/llm_stream.py,
-  api/routes/github_webhook.py, api/routes/custom_agents.py,
-  agents/custom/loader.py). Either trim to historical-only or do a
-  full pass.
+  pre-dates the v0.2.0 / v0.3.0 / v0.5.0 / v0.6.0 modules. The
+  header now declares it historical; v0.6.0 added per-section
+  "implemented at Task layer" callouts. Either trim to historical-
+  only or do a full pass.
 - **Flaky tests** — `test_save_1000_nodes_under_5s[json]` and the
   OpenAPI SDK subprocess test occasionally time out under heavy
   parallel load. Investigate once we have CI timing data.
