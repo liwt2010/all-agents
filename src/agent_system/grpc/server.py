@@ -32,17 +32,16 @@ from agent_system.grpc.handlers import GrpcServiceHandler, is_grpc_available
 logger = logging.getLogger(__name__)
 
 
-def _build_patches():
-    """Return a list of (add_PYTHONPATH_to) patches for the gRPC servicer.
+def _build_patches() -> tuple:
+    """Return a (Servicer, _pb2, _pb2_grpc) tuple for the gRPC servicer.
 
-    A "patch" is a callable that registers the GrpcServiceHandler
-    methods on the generated Servicer class. We build it dynamically
-    to avoid hard-importing the generated _pb2_grpc module (which
-    only exists after running protoc).
+    The returned Servicer class is built dynamically to avoid
+    hard-importing the generated _pb2_grpc module (which only
+    exists after running protoc).
     """
     try:
-        from agent_system.grpc import _pb2_grpc  # type: ignore
-        from agent_system.grpc import _pb2  # type: ignore
+        from agent_system.grpc import agent_system_pb2_grpc  # type: ignore
+        from agent_system.grpc import agent_system_pb2  # type: ignore
     except ImportError:
         raise RuntimeError(
             "agent_system.grpc._pb2_grpc is not generated. "
@@ -53,51 +52,83 @@ def _build_patches():
             "  src/agent_system/grpc/proto/agent_system.proto"
         )
 
-    class AgentSystemServicer(_pb2_grpc.AgentSystemServiceServicer):
+    class AgentSystemServicer(agent_system_pb2_grpc.AgentSystemServiceServicer):
         def __init__(self, handler: GrpcServiceHandler):
             self._h = handler
 
-        async def SubmitTask(self, request, context):
+        def SubmitTask(self, request, context):
+            import asyncio
             req = {
                 "input": request.input,
                 "agent": request.agent,
                 "tenant_id": request.tenant_id,
                 "metadata": _struct_to_dict(request.metadata),
             }
-            row = await self._h.submit_task(req)
-            return _dict_to_task_message(row, _pb2)
+            row = asyncio.run(self._h.submit_task(req))
+            return _dict_to_task_message(row, agent_system_pb2)
 
-        async def GetTask(self, request, context):
+        def GetTask(self, request, context):
+            import asyncio
+            import grpc
             req = {"id": request.id, "tenant_id": request.tenant_id}
-            row = await self._h.get_task(req)
+            row = asyncio.run(self._h.get_task(req))
             if row is None:
-                await context.abort(_pb2_grpc_pb2.StatusCode.NOT_FOUND, "task not found")
-            return _dict_to_task_message(row, _pb2)
+                context.abort(grpc.StatusCode.NOT_FOUND, "task not found")
+                return agent_system_pb2.Task()
+            return _dict_to_task_message(row, agent_system_pb2)
 
-        async def ListTasks(self, request, context):
+        def ListTasks(self, request, context):
+            import asyncio
             req = {
                 "tenant_id": request.tenant_id,
                 "status": request.status,
                 "limit": request.limit,
                 "cursor": request.cursor,
             }
-            async for page in self._h.list_tasks(req):
-                yield _pb2.ListTasksResponse(
-                    tasks=[_dict_to_task_message(t, _pb2) for t in page["tasks"]],
+            # The generated servicer passes this generator back to
+            # grpc; gRPC pulls the next value when it needs to send
+            # the next stream message. We bridge by wrapping the
+            # async generator in a sync one via asyncio.run per
+            # value, which is the canonical pattern for sync-from-async
+            # gRPC servicer methods.
+            for page in self._iter_list_tasks(req, context):
+                yield page
+
+        def _iter_list_tasks(self, req, context):
+            import asyncio
+            async def _collect():
+                out = []
+                async for page in self._h.list_tasks(req):
+                    out.append(page)
+                return out
+            pages = asyncio.run(_collect())
+            for page in pages:
+                yield agent_system_pb2.ListTasksResponse(
+                    tasks=[_dict_to_task_message(t, agent_system_pb2) for t in page["tasks"]],
                     next_cursor=page.get("next_cursor", "") or "",
                 )
 
-        async def StreamLLM(self, request, context):
+        def StreamLLM(self, request, context):
+            return self._iter_stream_llm(request, context)
+
+        def _iter_stream_llm(self, request, context):
+            import asyncio
             req = {
                 "prompt": request.prompt,
                 "system_prompt": request.system_prompt,
                 "model": request.model,
                 "tenant_id": request.tenant_id,
             }
-            async for ev in self._h.stream_llm(req):
-                yield _dict_to_llm_event(ev, _pb2)
+            async def _collect():
+                out = []
+                async for ev in self._h.stream_llm(req):
+                    out.append(ev)
+                return out
+            events = asyncio.run(_collect())
+            for ev in events:
+                yield _dict_to_llm_event(ev, agent_system_pb2)
 
-    return AgentSystemServicer, _pb2, _pb2_grpc
+    return AgentSystemServicer, agent_system_pb2, agent_system_pb2_grpc
 
 
 def _struct_to_dict(struct) -> dict[str, Any]:

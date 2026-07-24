@@ -53,3 +53,9 @@ sdks/
 # Sub-projects that should live in their own repos —
 # kept on disk for convenience but excluded from this repo.
 projects/
+
+# gRPC generated stubs — regenerated locally via
+# `python -m agent_system.grpc.codegen` (200+ KB of auto-generated
+# code; kept out of the repo to avoid bloat and merge noise).
+src/agent_system/grpc/*_pb2.py
+src/agent_system/grpc/*_pb2_grpc.py

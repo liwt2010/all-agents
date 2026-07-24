@@ -34,8 +34,8 @@ def main() -> int:
         return 2
 
     repo_root = Path(__file__).resolve().parents[3]  # .../src/agent_system/grpc
-    proto_dir = repo_root / "agent_system" / "grpc" / "proto"
-    out_dir = repo_root / "agent_system" / "grpc"
+    proto_dir = repo_root / "src" / "agent_system" / "grpc" / "proto"
+    out_dir = repo_root / "src" / "agent_system" / "grpc"
     proto_file = proto_dir / "agent_system.proto"
 
     if not proto_file.exists():
@@ -43,7 +43,7 @@ def main() -> int:
         return 2
 
     cmd = [
-        "python",
+        sys.executable,
         "-m",
         "grpc_tools.protoc",
         f"-I{proto_dir}",
@@ -59,29 +59,30 @@ def main() -> int:
         print(res.stderr, file=sys.stderr)
         return res.returncode
 
-    # protoc emits a file `_pb2.py` and a file `_pb2_grpc.py`. The
-    # generated `_pb2_grpc.py` imports `_pb2` as a top-level module,
-    # which won't work when the file lives in our package. We fix
-    # that import with a one-liner sed.
-    for f in (out_dir / "_pb2_grpc.py",):
-        if f.exists():
-            text = f.read_text(encoding="utf-8")
-            # Replace `import agent_system_pb2 as ...` with a relative
-            # import. protoc emits:
-            #   import agent_system_pb2 as agent__system__pb2
-            # which only works if agent_system_pb2 is on sys.path.
-            # We replace with the package-relative form:
-            #   from . import _pb2 as agent__system__pb2
-            new = text.replace(
-                "import agent_system_pb2 as",
-                "from . import _pb2 as",
-            )
-            if new != text:
-                f.write_text(new, encoding="utf-8")
-                print(f"patched relative import in {f.name}")
+    # protoc emits `<proto-basename>_pb2.py` and `<proto-basename>_pb2_grpc.py`
+    # based on the .proto file's basename. For agent_system.proto, the
+    # files are agent_system_pb2.py and agent_system_pb2_grpc.py.
+    #
+    # The generated _pb2_grpc.py imports `agent_system_pb2` as a
+    # top-level module, which only works if the grpc directory is on
+    # sys.path. We patch that import to be package-relative so the
+    # module works inside the agent_system package.
+    proto_basename = proto_file.stem  # 'agent_system'
+    pb2_file = out_dir / f"{proto_basename}_pb2.py"
+    pb2_grpc_file = out_dir / f"{proto_basename}_pb2_grpc.py"
+
+    if pb2_grpc_file.exists():
+        text = pb2_grpc_file.read_text(encoding="utf-8")
+        new = text.replace(
+            f"import {proto_basename}_pb2 as",
+            f"from . import {proto_basename}_pb2 as",
+        )
+        if new != text:
+            pb2_grpc_file.write_text(new, encoding="utf-8")
+            print(f"patched relative import in {pb2_grpc_file.name}")
     print("ok — generated:")
-    print(f"  {out_dir / '_pb2.py'}")
-    print(f"  {out_dir / '_pb2_grpc.py'}")
+    print(f"  {pb2_file}")
+    print(f"  {pb2_grpc_file}")
     return 0
 
 
