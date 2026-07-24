@@ -1,5 +1,54 @@
 # Agent System — Release Notes
 
+## v0.6.1 — 2026-07-24 (Docs refresh)
+
+**Git tag:** `v0.6.1`
+**Scope:** documentation-only; no code, wire-format, or behavior
+change. Safe to pull without coordinating with running services.
+**Commits since v0.6.0:** 1 (`9eb17b7`).
+
+### Changed
+
+- **`docs/PRODUCTION.md`** — full rewrite (581 → 814 lines) to
+  bring the deployment guide to v0.6.0 reality. The previous
+  version was last touched for v0.3.0 and missed:
+  - **RS256 JWT** as the recommended auth path (v0.2.0); HS256
+    only kept for backward compat
+  - **JWKS endpoint** (`GET /api/auth/jwks`) and `scripts/gen_rsa_keys.py`
+  - **Redis rate-limit backend** + sliding-window contract
+  - **PostgreSQL row-level security** + the v0.2.0 GUC-based
+    tenant isolation pattern
+  - **WebSocket streaming** with token + tool-call events
+    (v0.2.0 / v0.4.0)
+  - **gRPC transport** on `:50051` (v0.5.0) and `x-user-id`
+    metadata attribution (v0.6.0)
+  - **GitHub App** integration (v0.3.0) with `GITHUB_BOT_USER_ID`
+    (v0.6.0)
+  - **Task collaboration** (v0.6.0) — `claim` / `handoff` /
+    `events` endpoints, CAS conflict handling (409 with current
+    record), `owner_id` immutability
+  - **Postgres migration SQL** for `owner_id` / `assignee_id` /
+    `version` / `visibility` / `created_at` / `updated_at` columns
+  - **The misleading "JSON / SQLite / Postgres three backends"
+    claim** — the code has only InMemory + Postgres
+- **`docs/README.md`** — bump PRODUCTION.md pointer from
+  "13-section" to "15-section" with v0.6.0 feature callout.
+- **`docs/TODO.md`** — remove the stale "PRODUCTION.md is out of
+  sync" debt line (now fixed); bump header from "post-v0.3.0" to
+  "post-v0.6.0"; ARCHITECTURE.md debt still tracked.
+
+### Migration
+
+Drop-in replacement for v0.6.0. No service restart required for
+already-running deployments; this is purely a documentation update.
+
+### Tests
+
+- **No test changes.** Full sweep remains 1105 passed / 16
+  skipped / 2 xfail.
+
+---
+
 ## v0.6.0 — 2026-07-24 (Task collaboration primitives)
 
 **Git tag:** `v0.6.0`

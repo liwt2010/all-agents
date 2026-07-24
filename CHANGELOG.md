@@ -29,6 +29,30 @@ of each release.
 
 ---
 
+## [0.6.1] — 2026-07-24 (Docs refresh)
+
+### Changed
+- **`docs/PRODUCTION.md`** — full rewrite for v0.6.0 (581 → 814
+  lines). Adds RS256 JWT, JWKS, Redis rate-limit, Postgres RLS +
+  v0.6.0 migration SQL, WebSocket streaming, gRPC transport with
+  x-user-id metadata guidance, GitHub App integration, and Task
+  collaboration primitives (CAS, claim, handoff, events, 409
+  patterns). Drops the misleading "JSON / SQLite / Postgres
+  three backends" claim — the code has only InMemory + Postgres.
+- **`docs/README.md`** — bump PRODUCTION.md pointer from
+  "13-section" to "15-section" with v0.6.0 feature callout.
+- **`docs/TODO.md`** — remove the stale "PRODUCTION.md is out of
+  sync" debt line (now fixed); bump header from "post-v0.3.0"
+  to "post-v0.6.0"; ARCHITECTURE.md debt still tracked.
+
+### Notes
+- Docs-only release. No code or wire-format changes; safe to
+  pull without coordinating with running services.
+- 0 tests added / 0 tests removed. Full sweep remains 1105
+  passed / 16 skipped / 2 xfail.
+
+---
+
 ## [0.6.0] — 2026-07-24 (Task collaboration primitives)
 
 ### Added
