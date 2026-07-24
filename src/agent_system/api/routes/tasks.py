@@ -28,7 +28,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent_system.api.state import (
     get_audit_logger_singleton,
@@ -582,6 +582,68 @@ async def handoff_task(
         owner_id=updated.owner_id,
         version=updated.version,
         from_assignee_id=previous_assignee,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/tasks/{task_id}/events — collaboration timeline
+# ---------------------------------------------------------------------------
+class TaskEvent(BaseModel):
+    timestamp: str
+    user_id: str
+    action: str
+    outcome: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskEventsResponse(BaseModel):
+    task_id: str
+    count: int
+    events: list[TaskEvent]
+
+
+@router.get("/api/tasks/{task_id}/events", response_model=TaskEventsResponse)
+async def get_task_events(
+    task_id: str,
+    limit: int = Query(default=100, le=1000),
+    user: User = Depends(_require_auth()),
+) -> TaskEventsResponse:
+    """Return the audit-log timeline for a task (claimed / handoff /
+    completed / failed / etc.). Same ACL as reading the task itself.
+
+    Implementation: delegates to the audit log with task_id. The query
+    already handles the v0.6.0 `task_id` field and the legacy
+    `resource_type='task' + resource_id=task_id` fallback, so entries
+    written before v0.6.0 still appear here.
+    """
+    task_store = get_task_store_singleton()
+    record = task_store.get(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    _ensure_can_read(user, record)
+
+    audit = get_audit_logger_singleton()
+    # FastAPI coerces Query → int before injection; the int() fallback
+    # here only matters if a caller (e.g. test) passes a Query object
+    # directly without going through the request handler.
+    try:
+        limit_value: int = int(limit)
+    except (TypeError, ValueError):
+        limit_value = 100
+    entries = audit.query_from_disk(task_id=task_id, limit=limit_value)
+    return TaskEventsResponse(
+        task_id=task_id,
+        count=len(entries),
+        events=[
+            TaskEvent(
+                timestamp=e.timestamp.isoformat() if e.timestamp else "",
+                user_id=e.user_id,
+                action=e.action,
+                outcome=e.outcome,
+                details=dict(e.details or {}),
+            )
+            for e in entries
+        ],
     )
 
 
