@@ -10,7 +10,7 @@ find your role below and follow the link.
 - [README.zh-CN.md](../README.zh-CN.md) / [README.zh-TW.md](../README.zh-TW.md) —
   Simplified Chinese / Traditional Chinese translations.
 - [RELEASE_NOTES.md](../RELEASE_NOTES.md) — per-release user-facing
-  change log (v0.1.0 / v0.1.1 / v0.2.0 / v0.3.0).
+  change log (v0.1.0 / v0.1.1 / v0.2.0 / v0.3.0 / v0.4.0 / v0.5.0).
 
 ## For deployers / operators
 
@@ -62,8 +62,8 @@ find your role below and follow the link.
 
 ## For contributors / maintainers
 
-- [TODO.md](TODO.md) — current backlog (function-call streaming,
-  marketplace UI, HL7/FHIR, gRPC, distributed task queue).
+- [TODO.md](TODO.md) — current backlog (marketplace UI, HL7/FHIR,
+  gRPC interceptors, distributed task queue).
 - [DEFERRED.md](../DEFERRED.md) — historically deferred items and
   their resolution.
 - [CHANGELOG.md](../CHANGELOG.md) — per-PR change log.
@@ -71,7 +71,7 @@ find your role below and follow the link.
 - [SECURITY.md](../SECURITY.md) — supported versions, reporting
   vulnerabilities.
 - [STATUS.md](../STATUS.md) — what works today, what doesn't, what
-  roadmap items are still open.
+  roadmap items are still open (bumped to v0.5.0).
 
 ## For the historically curious
 

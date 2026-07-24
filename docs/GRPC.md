@@ -65,47 +65,65 @@ is immediately visible over gRPC (and vice versa).
 
 ## gRPC clients
 
-A gRPC client looks like any other Python gRPC client:
+A gRPC client looks like any other Python gRPC client. The
+generated modules live alongside `proto/agent_system.proto` in
+`src/agent_system/grpc/` — run `python -m agent_system.grpc.codegen`
+once (or after a proto change) and import as below.
 
 ```python
 import grpc
-from agent_system.grpc import _pb2, _pb2_grpc  # generated
+from agent_system.grpc import agent_system_pb2 as pb
+from agent_system.grpc import agent_system_pb2_grpc as pbg
 
 channel = grpc.insecure_channel("localhost:50051")
-stub = _pb2_grpc.AgentSystemServiceStub(channel)
+stub = pbg.AgentSystemServiceStub(channel)
 
 # Submit + poll
-task = stub.SubmitTask(_pb2.SubmitTaskRequest(
+task = stub.SubmitTask(pb.SubmitTaskRequest(
     input="Write a PRD for a login feature",
     agent="product",
     tenant_id="acme",
 ))
 print(f"submitted: {task.id}")
 
-# Stream LLM events
-for ev in stub.StreamLLM(_pb2.StreamLLMRequest(
+# GetTask returns NOT_FOUND for missing / wrong-tenant ids
+try:
+    miss = stub.GetTask(pb.GetTaskRequest(id="nope", tenant_id="acme"))
+except grpc.RpcError as e:
+    assert e.code() == grpc.StatusCode.NOT_FOUND
+
+# Stream LLM events (text + tool calls)
+for ev in stub.StreamLLM(pb.StreamLLMRequest(
     prompt="Explain RS256 JWT",
     model="claude-haiku-4-5-20251001",
     tenant_id="acme",
 )):
     if ev.HasField("text"):
         print(ev.text.text, end="", flush=True)
+    elif ev.HasField("tool_start"):
+        print(f"\n[tool {ev.tool_start.tool} started]")
     elif ev.HasField("done"):
-        print(f"\n[done — {ev.done.usage.input_tokens} in / {ev.done.usage.output_tokens} out]")
+        u = ev.done.usage
+        print(f"\n[done — {u.input_tokens} in / {u.output_tokens} out]")
 ```
 
 ## Why the `.proto` is committed (but not the generated `.py`)
 
 We commit the **`.proto`** (the source of truth) but NOT the
-generated `_pb2.py` / `_pb2_grpc.py`. Generating produces
+generated `*_pb2.py` / `*_pb2_grpc.py`. Generating produces
 ~200 KB of auto-generated code that creates merge noise on every
 proto change. The `codegen.py` helper takes ~2 s to run and is
 idempotent.
 
 Run `python -m agent_system.grpc.codegen` once on first checkout
-and again any time the `.proto` changes. The result is checked
-into the `_pb2` module directory at the repo root (or in a
-sub-package if you prefer; adjust `codegen.py` to taste).
+and again any time the `.proto` changes. The result lands in
+`src/agent_system/grpc/` (alongside the `codegen.py` helper) and
+is **gitignored** — see `.gitignore`:
+
+```gitignore
+src/agent_system/grpc/*_pb2.py
+src/agent_system/grpc/*_pb2_grpc.py
+```
 
 ## Architecture
 
@@ -135,6 +153,11 @@ directly — no grpcio required. Once grpcio is installed, the
 servicer is a 100-line shim that we don't need to test
 separately; the handlers ARE the contract.
 
+End-to-end interop (server + client over a real gRPC channel)
+was verified during v0.5.0 development; the script lives in the
+commit history (`7db48c7`) and exercises SubmitTask / GetTask /
+ListTasks plus the `NOT_FOUND` status path on a missing task.
+
 ## Limitations
 
 - No gRPC **interceptors** (auth, rate limit) yet — the existing
@@ -142,7 +165,11 @@ separately; the handlers ARE the contract.
   auth/RL, add a `ServerInterceptor` to the gRPC server in
   `server.py`.
 - gRPC server runs in the same process as the REST API. For
-  high-RPC workloads, split into a separate deployment via
-  `AGENT_GRPC_ONLY=1` (TBD).
+  high-RPC workloads, split into a separate deployment by
+  starting `agent_system.grpc.server` standalone — the
+  `TaskStore` + `LLMRouter` singletons are independent.
 - No gRPC reflection — clients must know the proto path. To
   enable: `from grpc_reflection.v1alpha import reflection; reflection.enable_server(...)` after `add_AgentSystemServiceServicer_to_server`.
+- Generated `_pb2` modules are **gitignored** — each developer
+  regenerates locally via `agent_system.grpc.codegen`. CI also
+  runs codegen before any test that exercises the servicer.

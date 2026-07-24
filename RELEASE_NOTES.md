@@ -1,5 +1,113 @@
 # Agent System — Release Notes
 
+## v0.5.0 — 2026-07-24 (Native gRPC transport)
+
+**Git tag:** `v0.5.0`
+**Scope:** new feature; backward compatible.
+**Commits since v0.4.0:** 1 (`7db48c7` is post-tag fixup; original
+feat commit was `803a7f8`).
+
+REST and WebSocket stay the default API surface for browser /
+curl traffic. v0.5.0 adds a native gRPC transport alongside them
+for notebook kernels, microservices, and partner integrations —
+strongly-typed contracts, server-streaming for `ListTasks` and
+`StreamLLM`, generated clients in 11 first-party languages.
+
+### Added
+
+- **`.proto` source of truth** at
+  [`src/agent_system/grpc/proto/agent_system.proto`](src/agent_system/grpc/proto/agent_system.proto).
+  Four RPCs:
+
+  ```proto
+  service AgentSystemService {
+    rpc SubmitTask(SubmitTaskRequest) returns (Task);
+    rpc GetTask(GetTaskRequest) returns (Task);
+    rpc ListTasks(ListTasksRequest) returns (stream ListTasksResponse);
+    rpc StreamLLM(StreamLLMRequest) returns (stream LLMEvent);
+  }
+  ```
+
+  `LLMEvent` mirrors the WebSocket wire format — a `oneof`
+  covering `text` / `tool_start` / `tool_input` / `tool_end` /
+  `tool_result` / `done` / `error`. Clients dispatch on the
+  populated case just like they do on the WS frame `type`.
+
+- **Transport-neutral `GrpcServiceHandler`** in
+  `src/agent_system/grpc/handlers.py`. Takes dicts in, yields
+  dicts out — the gRPC servicer is a 100-line shim that
+  adapts protobuf to/from dicts. Future transports
+  (JSON-RPC, gRPC-Web, in-process bus) can reuse the same
+  handler unchanged.
+
+- **gRPC server entry point** —
+  `python -m agent_system.grpc.server` listens on `:50051`
+  by default; `AGENT_GRPC_PORT` overrides. In-process
+  `TaskStore` + `LLMRouter` are reused, so a task submitted
+  over HTTP is immediately visible over gRPC and vice versa.
+
+- **Generated `_pb2` modules are gitignored** — 200+ KB of
+  auto-generated code that would bloat the repo and create
+  merge noise on every proto change. Run
+  `python -m agent_system.grpc.codegen` once on first
+  checkout (or after a proto change). Idempotent; takes ~2s.
+
+- **25 new tests** in `tests/test_grpc_handlers.py` exercise
+  the handler class directly without grpcio installed — the
+  contract is the dict shape, which the generated servicer
+  translates. End-to-end interop verified over a real gRPC
+  channel: `SubmitTask` / `GetTask` / `ListTasks` / `NOT_FOUND`
+  status (rather than the previously-broken `UNKNOWN`).
+
+### Architecture
+
+```
+                  ┌─────────────────────────────┐
+   gRPC client ──▶│  AgentSystemServiceServicer │ ──▶ GrpcServiceHandler
+                  │  (generated, ~200 KB)       │     (transport-neutral)
+                  └─────────────────────────────┘                  │
+                                                                      │
+                            ┌─────────────────────────────────────┘
+                            ▼
+                  ┌─────────────────────────────┐
+                  │  Same in-process state as    │
+                  │  REST + WebSocket:           │
+                  │   - TaskStore (tasks)        │
+                  │   - LLMRouter (LLM)          │
+                  └─────────────────────────────┘
+```
+
+### Migration from v0.4.x
+
+- **No action required**. The REST and WebSocket APIs are
+  unchanged.
+- To start the gRPC listener alongside the REST server:
+  ```bash
+  pip install grpcio grpcio-tools
+  python -m agent_system.grpc.codegen        # one-time
+  python -m agent_system.grpc.server          # :50051
+  AGENT_GRPC_PORT=50052 python -m agent_system.grpc.server
+  ```
+- Clients in 11 first-party languages can be generated from
+  `src/agent_system/grpc/proto/agent_system.proto` via
+  `protoc`.
+
+### Known limitations
+
+- No gRPC **interceptors** (auth, rate limit) yet — the
+  existing HTTP middleware stack doesn't apply. If you need
+  per-RPC auth/RL, add a `ServerInterceptor` to the gRPC
+  server in `server.py`.
+- No gRPC reflection — clients must know the proto path. To
+  enable:
+  `from grpc_reflection.v1alpha import reflection; reflection.enable_server(...)`
+  after `add_AgentSystemServiceServicer_to_server`.
+- Server-streaming is per-message (one `ListTasksResponse`
+  per row) — fine for the current SQLite / Postgres backends,
+  but a future Celery/RQ worker may want to buffer pages.
+
+---
+
 ## v0.4.0 — 2026-07-22 (Streaming tool-call events)
 
 **Git tag:** `v0.4.0`
@@ -75,6 +183,7 @@ working. v0.4.0 surfaces tool calls as first-class stream events.
 
 **Git tag:** `v0.3.0`
 **Scope:** new feature; backward compatible.
+**Builds on:** v0.2.0 (production-hardening milestone).
 
 This release delivers the v0.3.0 roadmap item "GitHub App integration"
 early, on top of v0.2.0. Register the server as a GitHub App and
@@ -109,6 +218,7 @@ webhook responds within GitHub's 10s timeout.
 
 **Git tag:** `v0.2.0`
 **Scope:** backward-compatible additions; no breaking changes.
+**Builds on:** v0.1.1.
 
 This release closes the v0.2.0 roadmap: five PRs that move the
 platform from single-replica dev to multi-replica production.

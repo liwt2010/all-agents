@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![v0.5.0](https://img.shields.io/badge/release-v0.5.0-blue)](https://github.com/liwt2010/all-agents/releases/tag/v0.5.0)
 
-> **企業級多智能體編排平臺** — 生產級 AI 智能體系統,具備共享記憶、Schema 寬容、資料溯源、分散式追蹤、OpenAPI/SDK 自動生成、端對端可觀測性。
+> **企業級多智能體編排平臺** — 生產級 AI 智能體系統,具備共享記憶、Schema 寬容、資料溯源、分散式追蹤、OpenAPI/SDK 自動生成、端對端可觀測性、原生 gRPC 傳輸、流式工具呼叫事件。
 
 ```
 User → CEO Agent → Product Agent → Tech Agent → Test Agent → Deploy Agent
@@ -26,7 +26,7 @@ User → CEO Agent → Product Agent → Tech Agent → Test Agent → Deploy Ag
 | 沒有稽核追蹤 | 完整稽核日誌 + LLM 成本追蹤 |
 | 靜默失敗 | 資料溯源標籤(REAL_LLM / MOCK / LLM_FAILURE) |
 | 維運不透明 | Prometheus + OpenTelemetry 開箱即用 |
-| 難以擴充 | 自訂 Agent 平臺 + OpenAPI/SDK 自動生成 |
+| 難以擴充 | 自訂 Agent 平臺 + OpenAPI/SDK 自動生成 + 原生 gRPC 傳輸 |
 
 ---
 
@@ -57,7 +57,7 @@ docker run -d --name agent-system \
   -e AUTH_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(48))") \
   -e ANTHROPIC_API_KEY=sk-xxx \
   -p 8000:8000 \
-  liwt2010/all-agents:v0.1.0
+  liwt2010/all-agents:v0.5.0
 ```
 
 存取 API:
@@ -66,6 +66,7 @@ docker run -d --name agent-system \
 - OpenAPI JSON: http://localhost:8000/openapi.json
 - 健康檢查: http://localhost:8000/api/health
 - 指標: http://localhost:8000/metrics
+- gRPC: `localhost:50051`(執行 `python -m agent_system.grpc.server`;詳見 [docs/GRPC.md](docs/GRPC.md))
 
 ---
 
@@ -86,6 +87,48 @@ docker run -d --name agent-system \
 ---
 
 ## 生產級特性
+
+### v0.5.0 — 原生 gRPC 傳輸
+
+新的 gRPC 傳輸層與現有 REST + WebSocket API 並行執行,共用同一行程中的 `TaskStore` 和 `LLMRouter`。透過 HTTP 提交的任務立刻可經 gRPC 看到(反之亦然)。
+
+- **4 個 RPC** 定義於 [`src/agent_system/grpc/proto/agent_system.proto`](src/agent_system/grpc/proto/agent_system.proto):
+  - `SubmitTask(SubmitTaskRequest) returns (Task)`
+  - `GetTask(GetTaskRequest) returns (Task)` — 缺失或租戶不符時回傳 `NOT_FOUND`
+  - `ListTasks(ListTasksRequest) returns (stream ListTasksResponse)` — server-streaming
+  - `StreamLLM(StreamLLMRequest) returns (stream LLMEvent)` — server-streaming,文字 **加** 工具呼叫事件(與 WebSocket 線格式一致)
+- **傳輸無關的 handler** — `GrpcServiceHandler` 接收 dict、產出 dict。生成的 servicer 只是一層把 protobuf 與 dict 互譯的薄殼,未來傳輸(JSON-RPC、gRPC-Web、行程內匯流排)可直接複用。
+- **產生的 `_pb2` 模組已加入 .gitignore** — 200+ KB 自動生成程式碼會膨脹倉庫並在每次 proto 變更時帶來合併雜訊。首次 checkout 跑一次 `python -m agent_system.grpc.codegen` 即可,冪等。
+- **25 個新測試** 在 `tests/test_grpc_handlers.py` 直接驅動 handler 類別,不需要 grpcio;契約是 dict 形態,由產生的 servicer 負責翻譯。已透過真實 gRPC channel 端到端驗證(SubmitTask / GetTask / ListTasks / NOT_FOUND 狀態)。
+
+執行:
+
+```bash
+pip install grpcio grpcio-tools
+python -m agent_system.grpc.codegen          # 一次性
+python -m agent_system.grpc.server            # 預設 :50051
+AGENT_GRPC_PORT=50052 python -m agent_system.grpc.server
+```
+
+完整線格式、用戶端範例與架構說明見 [docs/GRPC.md](docs/GRPC.md)。
+
+### v0.4.0 — 流式工具呼叫事件
+
+生產級智能體不只會輸出文字——還會呼叫工具(搜尋、檢索、執行程式碼……)。v0.2.0 的串流端點只暴露文字增量,所以聊天 UI 在 LLM 工作時只能顯示 "...",執行器在串流中也看不到工具呼叫。v0.4.0 將工具呼叫提升為一級串流事件。
+
+- **`LLMRouter.stream_events()` async 產生器** — 單通道吐出 `StreamEvent` dataclass,kind 含:
+  - `text` — 文字增量(等同於舊 `chunk` 事件)
+  - `tool_start` — Provider 開啟了一次工具呼叫(`tool`、`id` 已設)
+  - `tool_input` — 呼叫參數的 JSON 片段
+  - `tool_end` — 工具參數已收齊
+  - `tool_result` — Agent 執行器對該工具的回傳
+  - `done` — 結束,帶聚合後的 `LLMUsage`
+  - `error` — Provider 或傳輸錯誤
+- **兩種 Provider 均支援**:
+  - **Anthropic** — `content_block_start`(tool_use) → `tool_start`;`input_json_delta` → `tool_input`;`content_block_stop` → `tool_end`
+  - **OpenAI** — `delta.tool_calls[].id` 出現 → `tool_start`;`.function.arguments` 增量 → `tool_input`;同一 index 不再有增量 → `tool_end`
+- **WS 端點橋接為 JSON 框** — `/api/ws/llm/stream` 現在會送出 `{"type":"tool_start","data":{"tool":"search","id":"..."}}`、`{"type":"tool_input",...}` 等;舊 `chunk` 事件保留以相容。
+- **9 個新測試** 在 `tests/test_llm_stream_events.py` 涵蓋事件語意、mock 模式串流、Anthropic / OpenAI 工具呼叫序列,以及 `stream_chunks()` 相容墊片;同時修正一個潛在的 `estimate_cost` 參數順序 bug。
 
 ### v0.3.0 — 自訂 Agent 市場 + GitHub App
 
@@ -113,6 +156,7 @@ docker run -d --name agent-system \
 | `/api/health` | GET | 否 | 存活探針 |
 | `/api/ready` | GET | 否 | 就緒探針(檢查 DB、LLM) |
 | `/api/auth/token` | POST | 否 | 簽發 JWT(僅開發環境 — v0.2.0 改 RS256) |
+| `/api/auth/jwks` | GET | 否 | RS256 公鑰(RFC 7517 JWKS) |
 | `/api/agents` | GET | JWT | 列出可用智能體 |
 | `/api/tasks` | POST | JWT | 提交任務 |
 | `/api/tasks/{id}` | GET | JWT | 取得任務結果 |
@@ -122,6 +166,14 @@ docker run -d --name agent-system \
 | `/api/graph/node/{id}` | GET | JWT | 取得指定圖譜節點 |
 | `/api/audit/query` | GET | JWT | 查詢稽核日誌 |
 | `/api/metrics` | GET | JWT | 應用指標(JSON) |
+| `/api/custom-agents` | GET | JWT | 列出自訂智能體(按租戶) |
+| `/api/custom-agents/{id}` | GET | JWT | 自訂智能體詳情 |
+| `/api/custom-agents/{id}/run` | POST | JWT | 呼叫自訂智能體 |
+| `/api/custom-agents:upload` | POST | JWT(admin) | 註冊 YAML 智能體 |
+| `/api/custom-agents/{id}` | DELETE | JWT(admin) | 刪除自訂智能體 |
+| `/api/ws/llm/stream` | WS | JWT(query) | 流式 LLM token + 工具呼叫事件 |
+| `/api/webhooks/github` | POST | HMAC | GitHub App webhook 接收器 |
+| **gRPC `:50051`** | — | (見 GRPC.md) | SubmitTask / GetTask / ListTasks / StreamLLM |
 | `/metrics` | GET | 否 | Prometheus 抓取端點 |
 
 完整 OpenAPI 規範: [/openapi.json](http://localhost:8000/openapi.json)
@@ -140,6 +192,7 @@ docker run -d --name agent-system \
 | `CORS_ALLOWED_ORIGINS` | 生產必填 | localhost:5173(開發) | 逗號分隔的 https:// 來源 |
 | `AGENT_OTEL_ENABLED` | 否 | `false` | 啟用 OpenTelemetry 追蹤 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 啟用 OTEL 時 | `http://localhost:4318` | OTLP/HTTP collector 位址 |
+| `AGENT_GRPC_PORT` | 否 | `50051` | gRPC 伺服器綁定埠(可選) |
 | `STORAGE_BACKEND` | 否 | `json` | `json` / `sqlite` / `postgres` |
 | `POSTGRES_URL` | postgres 時 | — | PostgreSQL 連線字串 |
 | `REDIS_URL` | 否 | — | Redis 位址(用於分散式鎖) |
@@ -164,6 +217,11 @@ docker run -d --name agent-system \
 src/agent_system/
 ├── agents/          # 9 個內建智能體(Product、Tech、Test、Deploy、CEO、Security、Docs、Review、DevOps)
 ├── api/             # FastAPI 服務(OpenAPI、中介層、WebSocket)
+├── grpc/                # 原生 gRPC 傳輸(v0.5.0)— codegen、handlers、server
+│   ├── proto/agent_system.proto   # 單一真相源
+│   ├── codegen.py                 # `python -m agent_system.grpc.codegen`
+│   ├── handlers.py                # 傳輸無關的 GrpcServiceHandler
+│   └── server.py                  # `python -m agent_system.grpc.server`
 ├── auth/            # JWT + RBAC + 多租戶上下文(從 core/auth/ 重新匯出)
 ├── codegen/         # OpenAPI 規範匯出 + Python/TypeScript SDK 生成器(PR-15)
 ├── concurrency/     # 分散式鎖(Redis + 記憶體兜底)
@@ -231,7 +289,7 @@ ANTHROPIC_API_KEY=sk-xxx pytest tests/test_*real_llm.py -v
 pytest tests/test_production_readiness.py -v
 ```
 
-**當前狀態**:362 個單元測試 + 5 個真實 LLM 端對端測試,0 已知回歸。
+**當前狀態**:**1048** 測試通過,**5** 跳過,**2** xfail,**3** 個 known failure(需 API key);含 **25** 個新 gRPC handler 測試,0 已知回歸。
 
 ---
 
@@ -293,6 +351,8 @@ MIT — 見 [LICENSE](LICENSE)。
 
 ## 發佈歷史
 
+- **v0.5.0** (2026-07-24) — 原生 gRPC 傳輸 — 4 個 RPC(`SubmitTask` / `GetTask` / `ListTasks` / `StreamLLM`),ListTasks 與 StreamLLM 為 server-streaming;`.proto` 為單一真相源;含 25 個新測試與真實 channel 端到端驗證
+- **v0.4.0** (2026-07-22) — 流式工具呼叫事件 — `LLMRouter.stream_events()` 將 `tool_start` / `tool_input` / `tool_end` / `tool_result` 提升為一級事件(Anthropic + OpenAI);WS 端點橋接為 JSON 框,舊 `chunk` 事件保留;含 9 個新測試並修復 `estimate_cost` 參數順序 bug
 - **v0.3.0** (2026-07-22) — 自訂 Agent 市場 + GitHub App
 - **v0.2.0** (2026-07-22) — 生產強化里程碑（RS256 JWT、Redis 限流、PostgreSQL 列級安全、OTel FastAPI 自動埋點、WebSocket 串流 LLM）
 - **v0.1.1** (2026-07-22) — Bug 修復 + 型別現代化（84 檔案）
@@ -300,8 +360,9 @@ MIT — 見 [LICENSE](LICENSE)。
 
 完整內容見 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-## 當前狀態 (v0.3.0)
+## 當前狀態 (v0.5.0)
 
-- **1012** 測試通過,**5** 跳過（WebSocket TestClient 框架限制）,**2** xfail
+- **1048** 測試通過,**5** 跳過(WebSocket TestClient 框架限制),**2** xfail
+- **25** 個新 gRPC handler 測試
 - **3** 個 known failure 在 test_*real_llm.py — 無 ANTHROPIC_API_KEY 時跳過
 - 詳細測試統計與歷史回歸趨勢見 [STATUS.md](STATUS.md)

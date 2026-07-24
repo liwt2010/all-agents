@@ -10,21 +10,7 @@ of each release.
 ## [Unreleased]
 
 ### Added
-- **gRPC transport (PR v0.5.0)**: agents can be reached over gRPC
-  in addition to REST and WebSocket. The new
-  `src/agent_system/grpc/proto/agent_system.proto` defines four
-  RPCs — `SubmitTask`, `GetTask`, `ListTasks` (server-streaming),
-  `StreamLLM` (server-streaming text + tool events). The
-  transport-neutral `GrpcServiceHandler` class reuses the same
-  in-process `TaskStore` and `LLMRouter` the REST/WS APIs use;
-  the gRPC servicer is a thin shim that translates
-  protobuf messages to/from dict-shaped events. To run:
-  `pip install grpcio grpcio-tools && python -m agent_system.grpc.codegen
-  && python -m agent_system.grpc.server` (defaults to :50051,
-  override with `AGENT_GRPC_PORT`). Tests: 25 new in
-  `test_grpc_handlers.py` exercise the handler class
-  directly without grpcio installed — the contract is the dict
-  shape, which the generated servicer translates.
+- *(none yet)*
 
 ### Changed
 - *(none yet)*
@@ -42,6 +28,70 @@ of each release.
 - *(none yet)*
 
 ---
+
+## [0.5.0] — 2026-07-24 (Native gRPC transport)
+
+### Added
+- **gRPC transport**: agents can be reached over gRPC in addition
+  to REST and WebSocket. The new
+  `src/agent_system/grpc/proto/agent_system.proto` defines four
+  RPCs — `SubmitTask`, `GetTask`, `ListTasks` (server-streaming),
+  `StreamLLM` (server-streaming text + tool events). The
+  transport-neutral `GrpcServiceHandler` class reuses the same
+  in-process `TaskStore` and `LLMRouter` the REST/WS APIs use;
+  the gRPC servicer is a thin shim that translates
+  protobuf messages to/from dict-shaped events.
+  - Generated `_pb2` / `_pb2_grpc` modules are **gitignored**
+    (200+ KB of auto-generated code). Run
+    `python -m agent_system.grpc.codegen` once on first checkout
+    or after a proto change; idempotent.
+  - To run the server: `pip install grpcio grpcio-tools &&
+    python -m agent_system.grpc.server` (defaults to :50051,
+    override with `AGENT_GRPC_PORT`).
+  - `GetTask` returns `NOT_FOUND` (real grpc.StatusCode) for
+    missing or wrong-tenant ids; not silently coerced to
+    `UNKNOWN`.
+  - 25 new tests in `test_grpc_handlers.py` exercise the handler
+    class directly without grpcio installed — the contract is
+    the dict shape, which the generated servicer translates.
+    End-to-end interop verified over a real gRPC channel
+    (SubmitTask / GetTask / ListTasks / NOT_FOUND status).
+
+---
+
+## [0.4.0] — 2026-07-22 (Streaming tool-call events)
+
+### Added
+- **Streaming tool-call events (PR v0.4.0)**: the LLM stream now
+  surfaces tool calls as first-class events, not just text deltas.
+  `LLMRouter.stream_events()` async generator yields `StreamEvent`
+  dataclasses with kinds `text` / `tool_start` / `tool_input` /
+  `tool_end` / `tool_result` / `done` / `error`. Both Anthropic
+  (`content_block_start` / `input_json_delta` / `content_block_stop`)
+  and OpenAI (`delta.tool_calls` array) backends are supported; mock
+  mode emits the same shape so tests don't need an API key.
+  `/api/ws/llm/stream` bridges events to JSON frames (e.g.
+  `{"type":"tool_start","data":{"tool":"search","id":"call_abc"}}`)
+  while preserving the legacy `chunk` event for backwards compat.
+  Tests: 9 new in `test_llm_stream_events.py` cover event shape,
+  mock-mode, Anthropic tool-call sequence, OpenAI tool-call sequence,
+  and the `stream_chunks()` compat shim. Also fixes a pre-existing
+  latent bug: `estimate_cost` now coerces `None` / string token
+  counts to int (Anthropic returns `None` for cache fields when
+  caching is disabled; some providers serialize integers as strings).
+
+### Fixed
+- **Pre-existing `estimate_cost` arg order bug** — the streaming
+  helpers passed `(input_tokens, output_tokens, model)` but the
+  function signature is `(model, input_tokens, output_tokens,
+  cache_read, cache_write)`. In practice the cost came out wildly
+  wrong for streaming calls; in pathological cases (None cache
+  values from non-standard proxies) the division raised TypeError.
+  Caught by the new tests. Fix: pass `model` first.
+  (`e0bcfd5`).
+
+---
+
 - **Distributed rate limiter backend (PR v0.2.0)**: pluggable
   `RateLimiterBackend` protocol with two implementations:
   - `InMemoryBackend` — async, asyncio.Lock-protected. Default for
@@ -148,23 +198,6 @@ of each release.
   - Tests: 15 new in `test_storage_rls.py` cover migration surface,
     tenant-id validation, GUC emission, and the cross-tenant
     isolation contract (simulated against sqlite for portability).
-- **Streaming tool-call events (PR v0.4.0)**: the LLM stream now
-  surfaces tool calls as first-class events, not just text deltas.
-  `LLMRouter.stream_events()` async generator yields `StreamEvent`
-  dataclasses with kinds `text` / `tool_start` / `tool_input` /
-  `tool_end` / `tool_result` / `done` / `error`. Both Anthropic
-  (`content_block_start` / `input_json_delta` / `content_block_stop`)
-  and OpenAI (`delta.tool_calls` array) backends are supported; mock
-  mode emits the same shape so tests don't need an API key.
-  `/api/ws/llm/stream` bridges events to JSON frames (e.g.
-  `{"type":"tool_start","data":{"tool":"search","id":"call_abc"}}`)
-  while preserving the legacy `chunk` event for backwards compat.
-  Tests: 9 new in `test_llm_stream_events.py` cover event shape,
-  mock-mode, Anthropic tool-call sequence, OpenAI tool-call sequence,
-  and the `stream_chunks()` compat shim. Also fixes a pre-existing
-  latent bug: `estimate_cost` now coerces `None` / string token
-  counts to int (Anthropic returns `None` for cache fields when
-  caching is disabled; some providers serialize integers as strings).
 - **OpenTelemetry FastAPI auto-instrumentation (PR v0.2.0)**: when
   `AGENT_OTEL_ENABLED=true`, the lifespan automatically calls
   `FastAPIInstrumentor.instrument_app(app)` after `init_otel_exporter()`

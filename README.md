@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![v0.5.0](https://img.shields.io/badge/release-v0.5.0-blue)](https://github.com/liwt2010/all-agents/releases/tag/v0.5.0)
 
-**Enterprise Multi-Agent Orchestration Platform** — production-grade AI agent system with shared memory, schema tolerance, data provenance, distributed tracing, OpenAPI/SDK auto-generation, end-to-end observability, RS256 JWT auth, Redis-backed rate limiting, PostgreSQL row-level security, WebSocket LLM streaming, GitHub App integration, and a Custom Agent marketplace.
+**Enterprise Multi-Agent Orchestration Platform** — production-grade AI agent system with shared memory, schema tolerance, data provenance, distributed tracing, OpenAPI/SDK auto-generation, end-to-end observability, RS256 JWT auth, Redis-backed rate limiting, PostgreSQL row-level security, WebSocket + gRPC LLM streaming, GitHub App integration, a Custom Agent marketplace, and first-class streaming of tool-call events.
 
 ```
 User → CEO Agent → Product Agent → Tech Agent → Test Agent → Deploy Agent
@@ -36,9 +36,11 @@ User → CEO Agent → Product Agent → Tech Agent → Test Agent → Deploy Ag
 | Single-replica | Distributed sliding-window rate limit (Redis Lua) |
 | Schema-level leak risk | PostgreSQL row-level security (RLS) |
 | One-shot LLM calls | WebSocket token-by-token streaming |
+| One-shot LLM calls | WebSocket token-by-token + tool-call event streaming |
 | Manual code review | GitHub App auto-triggers ReviewAgent on PR |
 | Source-only agents | YAML-defined custom agents per tenant |
 | Hard to extend | OpenAPI/SDK auto-gen + ADR-documented decisions |
+| HTTP-only API | Native gRPC transport (4 RPCs, server-streaming) |
 
 ---
 
@@ -76,12 +78,13 @@ docker run -d --name agent-system \
 
 Generate the RSA keypair once with: `python scripts/gen_rsa_keys.py --kid v1`
 
-Browse the API:
+Access the API:
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 - OpenAPI JSON: http://localhost:8000/openapi.json
 - Health: http://localhost:8000/api/health
 - Metrics: http://localhost:8000/metrics
+- gRPC: `localhost:50051` (after `python -m agent_system.grpc.server`; see [docs/GRPC.md](docs/GRPC.md))
 
 ---
 
@@ -102,6 +105,85 @@ Browse the API:
 ---
 
 ## Production Features
+
+### v0.5.0 — Native gRPC transport
+
+A new gRPC transport runs alongside the existing REST + WebSocket
+APIs. The same in-process `TaskStore` and `LLMRouter` are reused,
+so a task submitted over HTTP is immediately visible over gRPC
+(and vice versa).
+
+- **4 RPCs** in [`src/agent_system/grpc/proto/agent_system.proto`](src/agent_system/grpc/proto/agent_system.proto):
+  - `SubmitTask(SubmitTaskRequest) returns (Task`
+  - `GetTask(GetTaskRequest) returns (Task` — returns
+    `NOT_FOUND` for missing/wrong-tenant ids
+  - `ListTasks(ListTasksRequest) returns (stream ListTasksResponse)` —
+    server-streaming
+  - `StreamLLM(StreamLLMRequest) returns (stream LLMEvent)` —
+    server-streaming text **and** tool-call events (mirrors the
+    WebSocket wire format)
+- **Transport-neutral handler** — `GrpcServiceHandler` takes
+  dicts in, yields dicts out. The generated servicer is a thin
+  shim that adapts protobuf to/from dicts, so future transports
+  (JSON-RPC, gRPC-Web, in-process bus) can reuse the same handlers.
+- **Generated `_pb2` modules are gitignored** — 200+ KB of
+  auto-generated code that bloats the repo and creates merge
+  noise on every proto change. Run
+  `python -m agent_system.grpc.codegen` once on first checkout
+  (or after a proto change); idempotent.
+- **25 new tests** in `tests/test_grpc_handlers.py` exercise the
+  handler class directly without grpcio installed — the contract
+  is the dict shape, which the generated servicer translates.
+  Verified end-to-end with a real gRPC channel (SubmitTask /
+  GetTask / ListTasks / NOT_FOUND status).
+
+To run:
+
+```bash
+pip install grpcio grpcio-tools
+python -m agent_system.grpc.codegen          # one-time
+python -m agent_system.grpc.server            # default :50051
+AGENT_GRPC_PORT=50052 python -m agent_system.grpc.server
+```
+
+See [docs/GRPC.md](docs/GRPC.md) for the full wire format,
+client examples, and architecture notes.
+
+### v0.4.0 — Streaming tool-call events
+
+Production agents don't just generate text — they also call tools
+(search, retrieval, code_exec, …). v0.2.0's streaming endpoint
+exposed only text deltas, so chat UIs could only show "..."
+while the LLM was working and the executor couldn't see tool
+calls mid-stream. v0.4.0 surfaces tool calls as first-class
+stream events.
+
+- **`LLMRouter.stream_events()` async generator** — single-channel
+  emission of `StreamEvent` dataclasses with kinds:
+  - `text` — incremental text delta (same payload as the legacy
+    `chunk` event)
+  - `tool_start` — provider opened a tool call (`tool`, `id` set)
+  - `tool_input` — JSON fragment of the call arguments
+  - `tool_end` — tool arguments are complete
+  - `tool_result` — agent executor's result for the tool
+  - `done` — terminal; carries aggregated `LLMUsage`
+  - `error` — provider or transport error
+- **Both providers supported**:
+  - **Anthropic** — maps `content_block_start` (tool_use) →
+    `tool_start`; `input_json_delta` → `tool_input`;
+    `content_block_stop` → `tool_end`.
+  - **OpenAI** — maps `delta.tool_calls[].id` present →
+    `tool_start`; `.function.arguments` deltas → `tool_input`;
+    no more deltas at a given index → `tool_end`.
+- **WS endpoint bridges to JSON frames** —
+  `/api/ws/llm/stream` now emits
+  `{"type":"tool_start","data":{"tool":"search","id":"..."}}`,
+  `{"type":"tool_input",...}`, etc. Legacy `chunk` events still
+  work for back-compat.
+- **9 new tests** in `tests/test_llm_stream_events.py` cover
+  event-shape semantics, mock-mode streaming, Anthropic and
+  OpenAI tool-call sequences, and the `stream_chunks()` compat
+  shim. Also fixes a pre-existing `estimate_cost` arg-order bug.
 
 ### v0.3.0 — Custom Agent Marketplace + GitHub App
 
@@ -266,8 +348,9 @@ not just *what* it does.
 | `/api/custom-agents/{id}/run` | POST | JWT | Invoke a custom agent |
 | `/api/custom-agents:upload` | POST | JWT (admin) | Register a YAML agent |
 | `/api/custom-agents/{id}` | DELETE | JWT (admin) | Remove a custom agent |
-| `/api/ws/llm/stream` | WS | JWT (query) | Streaming LLM tokens |
+| `/api/ws/llm/stream` | WS | JWT (query) | Streaming LLM tokens + tool-call events |
 | `/api/webhooks/github` | POST | HMAC | GitHub App webhook receiver |
+| **gRPC `:50051`** | — | (see GRPC.md) | SubmitTask / GetTask / ListTasks / StreamLLM |
 | `/metrics` | GET | No | Prometheus scrape endpoint |
 
 Full OpenAPI spec: [/openapi.json](http://localhost:8000/openapi.json)
@@ -290,6 +373,7 @@ Full OpenAPI spec: [/openapi.json](http://localhost:8000/openapi.json)
 | `CORS_ALLOWED_ORIGINS` | Prod yes | localhost:5173 (dev) | Comma-separated https:// origins |
 | `AGENT_OTEL_ENABLED` | No | `false` | Enable OpenTelemetry tracing |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | If OTEL on | `http://localhost:4318` | OTLP/HTTP collector URL |
+| `AGENT_GRPC_PORT` | No | `50051` | gRPC server bind port (opt-in) |
 | `STORAGE_BACKEND` | No | `json` | `json` / `sqlite` / `postgres` |
 | `POSTGRES_URL` | If postgres | — | PostgreSQL connection string |
 | `REDIS_URL` | No | — | Redis URL (for distributed rate limit / lock) |
@@ -324,6 +408,11 @@ src/agent_system/
 ├── api/                # FastAPI server (routers/, state.py, server.py)
 │   └── routes/         # health / auth / tasks / agents / graph / metrics /
 │                       # audit / llm_stream / github_webhook / custom_agents
+├── grpc/                # Native gRPC transport (v0.5.0) — codegen, handlers, server
+│   ├── proto/agent_system.proto   # Source of truth
+│   ├── codegen.py                 # `python -m agent_system.grpc.codegen`
+│   ├── handlers.py                # Transport-neutral GrpcServiceHandler
+│   └── server.py                  # `python -m agent_system.grpc.server`
 ├── auth/               # (deprecated — moved to core/auth/)
 ├── codegen/            # OpenAPI spec dump + Python/TypeScript SDK gen
 ├── concurrency/        # Distributed lock (Redis + in-memory fallback)
@@ -355,11 +444,12 @@ docs/
 ├── AUDIT.md            # Audit log
 ├── DATAVIEW.md         # Memory graph query engine
 ├── CUSTOM_AGENT.md     # Custom Agent design
-└── adr/                # Architectural Decision Records
-    ├── 0000-adr-template.md
-    ├── 0001-rs256-jwt.md
-    ├── 0002-postgres-rls.md
-    └── 0003-github-webhook.md
+├── adr/                # Architectural Decision Records
+│   ├── 0000-adr-template.md
+│   ├── 0001-rs256-jwt.md
+│   ├── 0002-postgres-rls.md
+│   └── 0003-github-webhook.md
+└── GRPC.md             # gRPC transport guide (v0.5.0)
 
 examples/
 └── custom-agents/      # Example YAML for the marketplace
@@ -427,18 +517,25 @@ pytest tests/test_rate_limit_redis.py -v
 # is skipped due to anyio 4.x + httpx 0.28 TestClient transport bug)
 pytest tests/test_llm_stream.py -v
 
+# Streaming tool-call event tests (v0.4.0)
+pytest tests/test_llm_stream_events.py -v
+
 # GitHub webhook tests
 pytest tests/test_github_webhook.py -v
 
 # Custom Agent marketplace tests
 pytest tests/test_custom_agent_loader.py -v
+
+# gRPC transport tests (no grpcio required — exercise the handler)
+pytest tests/test_grpc_handlers.py -v
 ```
 
-**Current state** (v0.3.0): **1012** tests pass, **5** skipped (WebSocket
-endpoint-level — documented framework limitation), **2** xfail
-(`openapi-python-client` 0.26 upstream UP007 bug), **3** known failures
-in `test_*real_llm.py` (all skip locally without `ANTHROPIC_API_KEY`,
-pass in CI with a key), 0 known regressions.
+**Current state** (v0.5.0): **1048** tests pass, **5** skipped
+(WebSocket endpoint-level — documented framework limitation),
+**2** xfail (`openapi-python-client` 0.26 upstream UP007 bug),
+**3** known failures in `test_*real_llm.py` (all skip locally
+without `ANTHROPIC_API_KEY`, pass in CI with a key),
+**25** new gRPC handler tests, 0 known regressions.
 
 ---
 
@@ -467,6 +564,21 @@ Incident response: [docs/RUNBOOK.md](docs/RUNBOOK.md)
 
 ## Roadmap
 
+### v0.5.0 — delivered ✅
+
+- ✅ **Native gRPC transport** — 4 RPCs (SubmitTask / GetTask /
+  ListTasks / StreamLLM), server-streaming for ListTasks and
+  StreamLLM; `.proto`-driven, transport-neutral handler, generated
+  `_pb2` modules gitignored.
+
+### v0.4.0 — delivered ✅
+
+- ✅ **Streaming tool-call events** — `LLMRouter.stream_events()`
+  surfaces `tool_start` / `tool_input` / `tool_end` /
+  `tool_result` as first-class events (not just text deltas).
+  Anthropic + OpenAI backends supported; WS endpoint bridges to
+  JSON frames.
+
 ### v0.3.0 — delivered ✅
 
 - ✅ **Custom Agent Marketplace** — YAML-defined agents per tenant,
@@ -484,14 +596,13 @@ Incident response: [docs/RUNBOOK.md](docs/RUNBOOK.md)
   spans
 - ✅ **WebSocket streaming LLM** with token-by-token delivery
 
-### Forward-looking (post-v0.3.0)
+### Forward-looking (post-v0.5.0)
 
-- **Streaming LLM completion events** (function-call streaming,
-  tool-call streaming) — currently only text deltas
 - **Multi-tenant Custom Agent marketplace UI** — web frontend for
   browsing/upload of custom agents
 - **HL7 / FHIR adapter** — healthcare data format integration
-- **Native gRPC server** alongside the REST/WS API
+- **gRPC interceptors** — auth + rate-limit middleware parity with
+  HTTP layer
 - **Distributed task queue** — currently single-process execution;
   add Celery/RQ for high-throughput deployments
 
@@ -503,6 +614,21 @@ MIT — see [LICENSE](LICENSE).
 
 ## Release History
 
+- **v0.5.0** (2026-07-24) — Native gRPC transport
+  - 4 RPCs (`SubmitTask`, `GetTask`, `ListTasks`, `StreamLLM`)
+    over `.proto`-driven gRPC; server-streaming for ListTasks +
+    StreamLLM
+  - Transport-neutral `GrpcServiceHandler` reuses the same
+    `TaskStore` + `LLMRouter` as REST/WS
+  - 25 new tests + end-to-end channel verification
+  - See [docs/GRPC.md](docs/GRPC.md)
+- **v0.4.0** (2026-07-22) — Streaming tool-call events
+  - `LLMRouter.stream_events()` surfaces `tool_start` /
+    `tool_input` / `tool_end` / `tool_result` (Anthropic +
+    OpenAI)
+  - WS endpoint bridges to JSON frames; legacy `chunk` events
+    preserved
+  - 9 new tests + a latent `estimate_cost` arg-order bug fix
 - **v0.3.0** (2026-07-22) — Custom Agent marketplace + GitHub App
   - YAML-defined custom agents per tenant (5 endpoints, 2 examples)
   - GitHub webhook receiver with HMAC + replay protection
