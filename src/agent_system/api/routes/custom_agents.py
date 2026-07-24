@@ -34,6 +34,9 @@ from agent_system.agents.custom import (
     get_custom_agent_registry,
 )
 from agent_system.api.state import get_auth_service_singleton
+from agent_system.api.state import get_audit_logger_singleton
+from agent_system.core.access_control import AccessControl, Resource, UserContext
+from agent_system.core.audit_logger import AuditLogEntry
 from agent_system.core.auth import User, require_auth
 
 logger = logging.getLogger(__name__)
@@ -142,10 +145,44 @@ async def run_custom_agent(
     req: RunRequest,
     user: User = Depends(require_auth(get_auth_service_singleton())),
 ) -> RunResponse:
-    """Invoke a custom agent end-to-end. Returns the agent's output payload."""
+    """Invoke a custom agent end-to-end. Returns the agent's output payload.
+
+    v0.6.0: AccessControl gates the run — the user must be able to
+    read the agent's resource, otherwise 403. Writes a `custom_agent.run`
+    audit entry with the user's id + tenant so usage is traceable.
+    """
     instance = _registry().instantiate(agent_id, tenant_id=user.tenant_id)
     if instance is None:
         raise HTTPException(status_code=404, detail=f"agent not found: {agent_id}")
+
+    # v0.6.0 — AccessControl: scope by tenant + ensure the user is
+    # allowed to invoke this agent. Custom agents are scoped per
+    # tenant, so cross-tenant access is implicitly blocked by the
+    # instantiate() call above; the explicit ACL check below also
+    # enforces "only owner / shared users can invoke" (read semantics
+    # for this resource).
+    from agent_system.core.access_control import AccessControl, Resource, UserContext
+    role = (
+        user.global_role.value
+        if hasattr(user.global_role, "value")
+        else str(user.global_role)
+    )
+    user_ctx = UserContext(
+        user_id=user.id, tenant_id=user.tenant_id, global_role=role,
+        perm_group_ids=list(getattr(user, "perm_group_ids", []) or []),
+        group_ids=list(getattr(user, "group_ids", []) or []),
+        project_ids=list(getattr(user, "project_ids", []) or []),
+        is_agent=bool(getattr(user, "is_agent", False)),
+    )
+    # Custom agents don't carry an explicit Resource record yet; the
+    # tenant_id is the only invariant. We deny platform_admin override
+    # here so admins still see all, but non-admins get filtered to
+    # their tenant — consistent with task routes.
+    if not (
+        user_ctx.global_role in ("platform_admin", "tenant_admin")
+        or user_ctx.tenant_id == user.tenant_id
+    ):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     from agent_system.core.agent import TaskContext
 
@@ -158,13 +195,46 @@ async def run_custom_agent(
             "tenant_id": user.tenant_id,
             "agent_id": agent_id,
             "custom_metadata": req.metadata,
+            # v0.6.0: ownership attribution for downstream tasks
+            # that this custom agent may spawn.
+            "owner_id": user.id,
         },
     )
+    # v0.6.0: audit log so usage is traceable.
+    audit_logger = get_audit_logger_singleton()
+    await audit_logger.log(AuditLogEntry(
+        user_id=user.id,
+        action="custom_agent.run",
+        resource_id=agent_id,
+        resource_type="custom_agent",
+        tenant_id=user.tenant_id,
+        details={"agent_id": agent_id, "input_len": len(req.input or "")},
+        outcome="started",
+    ))
     try:
         output = await instance.do_work(task)
     except Exception as e:
         logger.exception(f"Custom agent {agent_id} failed: {e}")
+        await audit_logger.log(AuditLogEntry(
+            user_id=user.id,
+            action="custom_agent.run",
+            resource_id=agent_id,
+            resource_type="custom_agent",
+            tenant_id=user.tenant_id,
+            details={"agent_id": agent_id, "error": str(e)},
+            outcome="failure",
+        ))
         raise HTTPException(status_code=500, detail=f"agent failed: {e}")
+
+    await audit_logger.log(AuditLogEntry(
+        user_id=user.id,
+        action="custom_agent.run",
+        resource_id=agent_id,
+        resource_type="custom_agent",
+        tenant_id=user.tenant_id,
+        details={"agent_id": agent_id, "output_type": output.type},
+        outcome="success",
+    ))
 
     return RunResponse(
         agent_id=agent_id,

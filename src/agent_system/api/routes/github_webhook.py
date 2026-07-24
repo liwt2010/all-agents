@@ -35,6 +35,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
 from collections import OrderedDict
 
@@ -238,6 +239,15 @@ async def _run_review(
                 "delivery_id": delivery_id,
                 "repo": repo_full,
                 "pr_number": pr_number,
+                # v0.6.0: ownership attribution. The PR review runs as
+                # a bot user (configurable via GITHUB_BOT_USER_ID env,
+                # default "github-bot"). Visibility is PROJECT so
+                # reviewers / collaborators can find it via the
+                # SpaceVisibility.PROJECT filter; project_ids groups
+                # reviews by repo so they don't bleed across.
+                "owner_id": os.environ.get("GITHUB_BOT_USER_ID", "github-bot"),
+                "visibility": "project",
+                "project_ids": [f"pr:{repo_full}"],
             },
         )
         instance = agent_registry.get_instance("review_agent")
